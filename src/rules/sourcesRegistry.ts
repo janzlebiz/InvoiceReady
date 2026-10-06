@@ -8,6 +8,56 @@
  */
 
 import { RegulatorySource } from '../engine/types';
+import crypto from 'crypto';
+
+export class RegulatorySourceIntegrity {
+  /**
+   * Cryptographically verifies a retrieved official gazette/decree artifact against its registered statutory snapshot hash (Requirement 5).
+   */
+  public static verifyArtifactChecksum(
+    sourceId: string,
+    rawArtifactBuffer: Buffer | Uint8Array
+  ): {
+    valid: boolean;
+    sourceId: string;
+    expectedHash: string;
+    computedHash: string;
+    documentTitle: string;
+  } {
+    const source = REGULATORY_SOURCES[sourceId];
+    if (!source) {
+      throw new Error(`Regulatory source '${sourceId}' not found in registry.`);
+    }
+
+    const hash = crypto.createHash('sha256').update(rawArtifactBuffer).digest('hex');
+    const valid = hash.toLowerCase() === source.source_hash.toLowerCase();
+
+    return {
+      valid,
+      sourceId,
+      expectedHash: source.source_hash,
+      computedHash: hash,
+      documentTitle: source.document_title,
+    };
+  }
+
+  /**
+   * Returns authoritative metadata explaining the source hash provenance and snapshot guarantees.
+   */
+  public static getIntegrityMetadataDocumentation(): {
+    hashAlgorithm: string;
+    verificationPolicy: string;
+    limitationNote: string;
+  } {
+    return {
+      hashAlgorithm: 'SHA-256',
+      verificationPolicy:
+        'Statutory snapshot hashes represent immutable cryptographic digest of official gazette and revenue regulation releases at time of pack reconciliation.',
+      limitationNote:
+        'Dynamic web pages from official government portals may undergo cosmetic CMS updates. Runtime verification validates downloaded statutory PDF/XML artifact payloads against snapshot hashes.',
+    };
+  }
+}
 
 export const REGULATORY_SOURCES: Record<string, RegulatorySource> = {
   // -------------------------------------------------------------------------

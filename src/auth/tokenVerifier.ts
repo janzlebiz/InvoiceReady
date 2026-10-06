@@ -207,7 +207,12 @@ export class TokenVerifier {
     }
 
     try {
-      // Authoritative server-side derivation in PostgreSQL (Requirement 6, 11)
+      const isProduction = process.env.NODE_ENV === 'production';
+      const allowAutoOrgCreation = isProduction
+        ? process.env.ALLOW_AUTO_ORG_CREATION === 'true'
+        : true;
+
+      // Authoritative server-side derivation in PostgreSQL (Requirement 3, 6, 11)
       const userContext = await DatabaseService.resolveUserAndTenant(
         claims.uid,
         claims.email,
@@ -215,7 +220,7 @@ export class TokenVerifier {
         {
           emailVerified: claims.emailVerified,
           isAnonymous: claims.isAnonymous,
-          allowAutoOrgCreation: true,
+          allowAutoOrgCreation,
         }
       );
 
@@ -231,8 +236,43 @@ export class TokenVerifier {
       next();
     } catch (err: any) {
       console.error('Tenant resolution failure:', err.message);
+      if (err.message?.includes('Automatic organization creation is disabled')) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Automatic organization creation is disabled in production. Organization onboarding invitation required.',
+        });
+        return;
+      }
       res.status(500).json({ error: 'Internal server authorization error.' });
     }
+  }
+
+  /**
+   * Verifies Google Cloud Scheduler OIDC ID Token (Requirement 2)
+   */
+  public static async verifyCloudSchedulerOidc(token: string): Promise<boolean> {
+    if (!token) return false;
+
+    // 1. Check with Firebase Admin SDK (which verifies Google-issued OIDC/service account tokens)
+    const admin = this.getAdminAuth();
+    if (admin) {
+      try {
+        const decoded = await admin.verifyIdToken(token, true);
+        if (decoded) return true;
+      } catch (_) {}
+    }
+
+    // 2. In test/development mode with configured JWT test secret
+    if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
+      try {
+        const decoded: any = jwt.verify(token, this.JWT_TEST_SECRET);
+        if (decoded && (decoded.email?.includes('cloudscheduler') || decoded.role === 'SCHEDULER' || decoded.sub?.includes('scheduler'))) {
+          return true;
+        }
+      } catch (_) {}
+    }
+
+    return false;
   }
 
   /**

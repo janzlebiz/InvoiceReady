@@ -167,7 +167,13 @@ export class JobQueue {
 
     const parent = this.tasksClient.queuePath(project, location, queue);
     const workerUrl = `${appUrl}/api/internal/queue/worker`;
-    const taskSecret = process.env.INTERNAL_TASK_SECRET || process.env.CRON_SECRET || 'invoiceready-internal-worker-auth-key';
+    const taskSecret = process.env.INTERNAL_TASK_SECRET;
+
+    if (!taskSecret) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error('FATAL: INTERNAL_TASK_SECRET must be configured in production for Cloud Tasks dispatch.');
+      }
+    }
 
     const payload = {
       operation_id: operationId,
@@ -183,7 +189,7 @@ export class JobQueue {
         url: workerUrl,
         headers: {
           'Content-Type': 'application/json',
-          'X-Internal-Task-Secret': taskSecret,
+          'X-Internal-Task-Secret': taskSecret || '',
         },
         body: Buffer.from(JSON.stringify(payload)).toString('base64'),
       },
@@ -242,6 +248,7 @@ export class JobQueue {
 
   /**
    * Worker task: Performs extraction, normalization, deterministic rules, scoring, and report generation (Requirement 24)
+   * Enforces atomic lease claiming to prevent concurrent duplicate execution between Cloud Tasks and recovery supervisor.
    */
   public static async executeWorkerTask(
     operationId: string,
@@ -249,7 +256,14 @@ export class JobQueue {
     organizationId: string,
     userFullName: string
   ): Promise<any> {
-    await DatabaseService.updateJobStatus(operationId, organizationId, 'PROCESSING');
+    const workerId = `worker_${process.pid}_${Math.random().toString(36).substring(2, 7)}`;
+    const claimed = await DatabaseService.claimJobLease(operationId, organizationId, workerId, 180);
+
+    if (!claimed) {
+      console.log(`[JobQueue] Job ${operationId} is already actively claimed or completed. Skipping concurrent execution.`);
+      const existingJob = await DatabaseService.getJob(operationId, organizationId);
+      return existingJob?.result || { status: existingJob?.status || 'PROCESSING' };
+    }
 
     const scan = await DatabaseService.getScan(scanId, organizationId);
     if (!scan) throw new Error('Scan record not found');

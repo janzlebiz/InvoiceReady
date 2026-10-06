@@ -193,6 +193,9 @@ export class DatabaseService {
         status VARCHAR(32) NOT NULL DEFAULT 'QUEUED',
         attempt_count INT NOT NULL DEFAULT 1,
         max_attempts INT NOT NULL DEFAULT 3,
+        locked_at TIMESTAMPTZ,
+        locked_by VARCHAR(128),
+        lease_expires_at TIMESTAMPTZ,
         payload JSONB,
         result JSONB,
         error_message TEXT,
@@ -606,10 +609,40 @@ export class DatabaseService {
     return res.rows[0] || null;
   }
 
+  /**
+   * Atomically claims a job lease in PostgreSQL to prevent concurrent execution between Cloud Tasks and recovery supervisor (Requirement 4).
+   */
+  public static async claimJobLease(
+    operationId: string,
+    organizationId: string,
+    workerId: string,
+    leaseDurationSeconds = 180
+  ): Promise<boolean> {
+    await this.initialize();
+    const res = await this.client!.query(
+      `UPDATE job_queue
+       SET status = 'PROCESSING',
+           locked_at = NOW(),
+           locked_by = $1,
+           lease_expires_at = NOW() + ($2 || ' seconds')::INTERVAL,
+           attempt_count = attempt_count + 1,
+           updated_at = NOW()
+       WHERE operation_id = $3
+         AND organization_id = $4
+         AND (
+           status = 'QUEUED'
+           OR (status = 'PROCESSING' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+         )
+       RETURNING operation_id, status`,
+      [workerId, leaseDurationSeconds, operationId, organizationId]
+    );
+    return res.rows.length > 0;
+  }
+
   public static async getPendingQueueJobs(): Promise<any[]> {
     await this.initialize();
     const res = await this.client!.query(
-      `SELECT * FROM job_queue WHERE status = 'QUEUED' OR (status = 'PROCESSING' AND updated_at <= NOW() - INTERVAL '3 minutes') LIMIT 10`
+      `SELECT * FROM job_queue WHERE status = 'QUEUED' OR (status = 'PROCESSING' AND (lease_expires_at IS NULL OR lease_expires_at < NOW())) LIMIT 10`
     );
     return res.rows;
   }

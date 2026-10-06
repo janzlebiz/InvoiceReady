@@ -58,11 +58,6 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
 });
 
-// Initialize database
-DatabaseService.initialize().catch((err) => {
-  console.error('Fatal: Database initialization error:', err);
-});
-
 // ---------------------------------------------------------------------------
 // 1. AUTHENTICATION ENDPOINTS (Requirements 7-12)
 // ---------------------------------------------------------------------------
@@ -356,14 +351,30 @@ app.post('/api/scans/:scanId/process', TokenVerifier.requireAuth, async (req: Re
   }
 });
 
-// POST /api/internal/queue/worker - Authenticated internal Cloud Tasks worker handler (Requirement 4)
+// POST /api/internal/queue/worker - Authenticated internal Cloud Tasks worker handler (Requirements 1, 4)
 app.post('/api/internal/queue/worker', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const taskSecret = process.env.INTERNAL_TASK_SECRET || process.env.CRON_SECRET || 'invoiceready-internal-worker-auth-key';
+    const taskSecret = process.env.INTERNAL_TASK_SECRET;
     const providedSecret = req.headers['x-internal-task-secret'];
+    const authHeader = req.headers.authorization;
+
+    // Fail closed in production if secret is not configured
+    if (!taskSecret) {
+      if (process.env.NODE_ENV === 'production') {
+        res.status(500).json({
+          error: 'ConfigurationError',
+          message: 'FATAL: INTERNAL_TASK_SECRET is not configured in production.',
+        });
+        return;
+      }
+    }
+
+    const isSecretMatch = Boolean(
+      taskSecret && (providedSecret === taskSecret || authHeader === `Bearer ${taskSecret}`)
+    );
 
     // Require matching internal worker secret (fail closed on missing/invalid secret)
-    if (!providedSecret || providedSecret !== taskSecret) {
+    if (!isSecretMatch) {
       res.status(401).json({
         error: 'Unauthorized',
         message: 'Missing or invalid internal Cloud Tasks worker authorization secret.',
@@ -518,19 +529,37 @@ app.delete('/api/scans/:scanId', TokenVerifier.requireAuth, async (req: Request,
 // 3. RETENTION SCHEDULER ENDPOINT (Requirements 25-29)
 // ---------------------------------------------------------------------------
 
-// POST /api/jobs/retention - Managed Cloud Scheduler Retention Job
+// POST /api/jobs/retention - Authenticated Cloud Scheduler Retention Job (Requirements 1, 2, 25-29)
 app.post('/api/jobs/retention', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const isCloudScheduler = Boolean(req.headers['x-cloudscheduler']);
     const authHeader = req.headers.authorization;
-    const cronSecret = process.env.CRON_SECRET || 'invoiceready-cron-key-2026';
-    const isAuthorized =
-      isCloudScheduler ||
-      (authHeader && authHeader === `Bearer ${cronSecret}`) ||
-      process.env.NODE_ENV !== 'production';
+    const cronSecret = process.env.CRON_SECRET;
+
+    // Fail closed in production if secret is not configured
+    if (!cronSecret && process.env.NODE_ENV === 'production') {
+      res.status(500).json({
+        error: 'ConfigurationError',
+        message: 'FATAL: CRON_SECRET is not configured in production.',
+      });
+      return;
+    }
+
+    let isAuthorized = false;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      if (cronSecret && token === cronSecret) {
+        isAuthorized = true;
+      } else {
+        // Authenticated Google Cloud Scheduler OIDC ID Token Verification
+        isAuthorized = await TokenVerifier.verifyCloudSchedulerOidc(token);
+      }
+    }
 
     if (!isAuthorized) {
-      res.status(403).json({ error: 'Forbidden: Unauthorized retention scheduler call.' });
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Missing or invalid Cloud Scheduler authentication token. Header x-cloudscheduler alone is untrusted.',
+      });
       return;
     }
 

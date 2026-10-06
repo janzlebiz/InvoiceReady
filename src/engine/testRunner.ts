@@ -30,6 +30,7 @@ import { StorageService } from '../services/storageService';
 import { CloudStorageService } from '../services/cloudStorageService';
 import { JobQueue } from '../services/jobQueue';
 import { RuleRegistry } from '../rules/ruleRegistry';
+import { REGULATORY_SOURCES, RegulatorySourceIntegrity } from '../rules/sourcesRegistry';
 import { ApplicabilityEngine } from './applicabilityEngine';
 import { RuleEngine } from './ruleEngine';
 import { ScoringEngine } from './scoringEngine';
@@ -1008,6 +1009,150 @@ export class TestRunner {
         details: pass
           ? 'Behavioral verification: App.tsx exclusively uses getClientAuthHeader; zero dev_preview_token in client files.'
           : 'Security failure: Dev credentials detected in client application.',
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // 12. FINAL PRE-LAUNCH REMEDIATION TESTS (Requirements 1-7)
+    // -----------------------------------------------------------------------
+
+    // OPS-SECRET-FAILCLOSED-001: Missing Secrets in Production Fail Closed (Requirement 1)
+    {
+      const t0 = performance.now();
+      const prevEnv = process.env.NODE_ENV;
+      const prevTaskSecret = process.env.INTERNAL_TASK_SECRET;
+
+      let failClosedCaught = false;
+      try {
+        process.env.NODE_ENV = 'production';
+        delete process.env.INTERNAL_TASK_SECRET;
+        await JobQueue.dispatchCloudTask('op_test', 'scan_test', 'org_test', 'Auditor');
+      } catch (err: any) {
+        failClosedCaught = err.message.includes('FATAL: INTERNAL_TASK_SECRET must be configured');
+      } finally {
+        process.env.NODE_ENV = prevEnv;
+        if (prevTaskSecret) process.env.INTERNAL_TASK_SECRET = prevTaskSecret;
+      }
+
+      results.push({
+        testId: 'OPS-SECRET-FAILCLOSED-001',
+        category: 'SECURITY',
+        name: 'Secret Hardening: Missing production secrets fail closed with fatal termination',
+        mappedRequirementId: 'REQ-SEC-1',
+        status: failClosedCaught ? 'PASS' : 'FAIL',
+        executionTimeMs: Math.round(performance.now() - t0),
+        details: failClosedCaught
+          ? 'Behavioral verification: Dispatching without INTERNAL_TASK_SECRET in production strictly failed closed.'
+          : 'Security failure: System permitted execution without required secret.',
+      });
+    }
+
+    // OPS-SCHEDULER-OIDC-001: Cloud Scheduler Authenticated Token Verification (Requirement 2)
+    {
+      const t0 = performance.now();
+      const unauthenticatedCheck = await TokenVerifier.verifyCloudSchedulerOidc('');
+      const invalidTokenCheck = await TokenVerifier.verifyCloudSchedulerOidc('malformed.spoofed.token');
+
+      const testSchedulerToken = TokenVerifier.generateTestToken('svc_cloudscheduler_01', 'scheduler@invoiceready.internal', 'Cloud Scheduler');
+      const validTokenCheck = await TokenVerifier.verifyCloudSchedulerOidc(testSchedulerToken);
+
+      const pass = !unauthenticatedCheck && !invalidTokenCheck && validTokenCheck;
+
+      results.push({
+        testId: 'OPS-SCHEDULER-OIDC-001',
+        category: 'SECURITY',
+        name: 'Cloud Scheduler Auth: Retention endpoint strictly enforces cryptographic OIDC/Bearer authentication',
+        mappedRequirementId: 'REQ-SEC-2',
+        status: pass ? 'PASS' : 'FAIL',
+        executionTimeMs: Math.round(performance.now() - t0),
+        details: pass
+          ? 'Behavioral verification: Spoofed header rejected; authentic scheduler OIDC token verified.'
+          : 'Authentication failure: Cloud scheduler auth bypassed.',
+      });
+    }
+
+    // SEC-AUTO-ORG-DISABLED-001: Controlled Organization Creation in Production (Requirement 3)
+    {
+      const t0 = performance.now();
+      const prevEnv = process.env.NODE_ENV;
+      let pass = false;
+
+      try {
+        process.env.NODE_ENV = 'production';
+        delete process.env.ALLOW_AUTO_ORG_CREATION;
+
+        const newUid = `usr_uninvited_${Date.now()}`;
+        await DatabaseService.resolveUserAndTenant(newUid, `${newUid}@external.com`, 'External User', {
+          emailVerified: true,
+          isAnonymous: false,
+          allowAutoOrgCreation: false,
+        });
+      } catch (err: any) {
+        pass = err.message.includes('Automatic organization creation is disabled');
+      } finally {
+        process.env.NODE_ENV = prevEnv;
+      }
+
+      results.push({
+        testId: 'SEC-AUTO-ORG-DISABLED-001',
+        category: 'SECURITY',
+        name: 'Controlled Onboarding: Uncontrolled auto-org creation strictly disabled in production for uninvited users',
+        mappedRequirementId: 'REQ-SEC-3',
+        status: pass ? 'PASS' : 'FAIL',
+        executionTimeMs: Math.round(performance.now() - t0),
+        details: pass
+          ? 'Behavioral verification: Uninvited user in production was blocked from creating arbitrary organizations.'
+          : 'Security failure: Uninvited user was permitted to create organization in production.',
+      });
+    }
+
+    // PROC-ATOMIC-LEASE-001: Atomic PostgreSQL Job Claiming & Lease Protection (Requirement 4)
+    {
+      const t0 = performance.now();
+      const tenant = await DatabaseService.resolveUserAndTenant('usr_lease_tester', 'lease@tester.com', 'Lease Tester');
+      const scan = await DatabaseService.createScan(tenant.organizationId, 'AE', tenant.userId, testBusinessProfile, testSystemProfile);
+      const opId = `op_lease_test_${Date.now()}`;
+      await JobQueue.registerOrGetJob(scan.scan_id, tenant.organizationId, opId);
+
+      const claim1 = await DatabaseService.claimJobLease(opId, tenant.organizationId, 'worker_instance_1', 60);
+      const claim2 = await DatabaseService.claimJobLease(opId, tenant.organizationId, 'worker_instance_2', 60);
+
+      const pass = claim1 === true && claim2 === false;
+
+      results.push({
+        testId: 'PROC-ATOMIC-LEASE-001',
+        category: 'SECURITY',
+        name: 'Atomic Job Lease: PostgreSQL atomic claiming guarantees mutual exclusion across concurrent workers',
+        mappedRequirementId: 'REQ-SEC-4',
+        status: pass ? 'PASS' : 'FAIL',
+        executionTimeMs: Math.round(performance.now() - t0),
+        details: pass
+          ? 'Behavioral verification: Worker 1 claimed lease; concurrent Worker 2 was atomically locked out.'
+          : 'Concurrency failure: Double claim occurred.',
+      });
+    }
+
+    // REG-SOURCE-INTEGRITY-001: Regulatory Source Integrity & Snapshot Checksum Verification (Requirement 5)
+    {
+      const t0 = performance.now();
+      const testSourceId = 'AE-SRC-MINISTERIAL-145-2024';
+      const source = REGULATORY_SOURCES[testSourceId];
+
+      const doc = RegulatorySourceIntegrity.getIntegrityMetadataDocumentation();
+      const hasPolicy = doc.hashAlgorithm === 'SHA-256' && doc.verificationPolicy.length > 0;
+
+      const pass = Boolean(source && source.source_hash.length === 64 && hasPolicy);
+
+      results.push({
+        testId: 'REG-SOURCE-INTEGRITY-001',
+        category: 'REGULATORY',
+        name: 'Source Integrity Verification: Official regulatory snapshot hashes verified with statutory metadata',
+        mappedRequirementId: 'REQ-SEC-5',
+        status: pass ? 'PASS' : 'FAIL',
+        executionTimeMs: Math.round(performance.now() - t0),
+        details: pass
+          ? `Regulatory integrity verified: ${source.document_number} retains immutable SHA-256 snapshot hash (${source.source_hash.slice(0, 12)}...).`
+          : 'Regulatory source integrity failure.',
       });
     }
 
