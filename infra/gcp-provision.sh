@@ -16,8 +16,9 @@ QUARANTINE_BUCKET="${PROJECT_ID}-quarantine"
 DOCUMENTS_BUCKET="${PROJECT_ID}-documents"
 TASK_QUEUE="invoiceready-task-queue"
 SCHEDULER_JOB="invoiceready-retention-job"
+REPO_NAME="invoiceready-repo"
 
-echo "=== [1/7] Setting GCP Project and Enabling Required APIs ==="
+echo "=== [1/8] Setting GCP Project and Enabling Required APIs ==="
 gcloud config set project "${PROJECT_ID}"
 gcloud services enable \
   run.googleapis.com \
@@ -27,29 +28,37 @@ gcloud services enable \
   cloudscheduler.googleapis.com \
   secretmanager.googleapis.com \
   iam.googleapis.com \
+  artifactregistry.googleapis.com \
   vpcaccess.googleapis.com
 
-echo "=== [2/7] Creating IAM Service Account and Role Bindings ==="
+echo "=== [2/8] Creating Artifact Registry Repository ==="
+if ! gcloud artifacts repositories describe "${REPO_NAME}" --location="${REGION}" &>/dev/null; then
+  gcloud artifacts repositories create "${REPO_NAME}" \
+    --repository-format=docker \
+    --location="${REGION}" \
+    --description="InvoiceReady Production Container Registry"
+fi
+
+echo "=== [3/8] Creating IAM Service Account & Bucket-Scoped Role Bindings ==="
 if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT}" &>/dev/null; then
   gcloud iam service-accounts create invoiceready-runner \
     --display-name="InvoiceReady Cloud Run Runtime SA"
 fi
 
-# Apply least-privilege roles to the runtime service account
-ROLES=(
+# Project-level non-storage roles (Least Privilege)
+PROJECT_ROLES=(
   "roles/cloudsql.client"
-  "roles/storage.objectAdmin"
   "roles/cloudtasks.enqueuer"
   "roles/secretmanager.secretAccessor"
-);
+)
 
-for ROLE in "${ROLES[@]}"; do
+for ROLE in "${PROJECT_ROLES[@]}"; do
   gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member="serviceAccount:${SERVICE_ACCOUNT}" \
     --role="${ROLE}"
 done
 
-echo "=== [3/7] Provisioning Cloud SQL PostgreSQL Instance ==="
+echo "=== [4/8] Provisioning Cloud SQL PostgreSQL Instance & Networking ==="
 if ! gcloud sql instances describe "${DB_INSTANCE}" &>/dev/null; then
   gcloud sql instances create "${DB_INSTANCE}" \
     --database-version=POSTGRES_15 \
@@ -65,34 +74,37 @@ if ! gcloud sql databases describe "${DB_NAME}" --instance="${DB_INSTANCE}" &>/d
   gcloud sql databases create "${DB_NAME}" --instance="${DB_INSTANCE}"
 fi
 
-echo "=== [4/7] Provisioning GCS Storage Buckets & Lifecycle Rules ==="
+echo "=== [5/8] Provisioning GCS Buckets with Bucket-Scoped Least Privilege ==="
 # Quarantine Bucket (24-hour retention)
 if ! gsutil ls -b "gs://${QUARANTINE_BUCKET}" &>/dev/null; then
   gsutil mb -p "${PROJECT_ID}" -l "${REGION}" -b on "gs://${QUARANTINE_BUCKET}"
 fi
 gsutil lifecycle set infra/gcs-lifecycle-quarantine.json "gs://${QUARANTINE_BUCKET}"
+# Bucket-scoped objectAdmin binding ONLY
+gsutil iam ch "serviceAccount:${SERVICE_ACCOUNT}:objectAdmin" "gs://${QUARANTINE_BUCKET}"
 
-# Documents Bucket (30-day retention, private)
+# Documents Bucket (30-day retention, strictly private)
 if ! gsutil ls -b "gs://${DOCUMENTS_BUCKET}" &>/dev/null; then
   gsutil mb -p "${PROJECT_ID}" -l "${REGION}" -b on "gs://${DOCUMENTS_BUCKET}"
 fi
 gsutil lifecycle set infra/gcs-lifecycle-documents.json "gs://${DOCUMENTS_BUCKET}"
-gsutil iam ch -d allUsers "gs://${DOCUMENTS_BUCKET}" || true
+gcloud storage buckets update "gs://${DOCUMENTS_BUCKET}" --public-access-prevention
+# Bucket-scoped objectAdmin binding ONLY
+gsutil iam ch "serviceAccount:${SERVICE_ACCOUNT}:objectAdmin" "gs://${DOCUMENTS_BUCKET}"
 
-echo "=== [5/7] Provisioning Secret Manager Production Secrets ==="
+echo "=== [6/8] Provisioning Secret Manager Production Secrets ==="
 SECRETS=("DATABASE_URL" "INTERNAL_TASK_SECRET" "CRON_SECRET" "GEMINI_API_KEY")
 
 for SECRET in "${SECRETS[@]}"; do
   if ! gcloud secrets describe "${SECRET}" &>/dev/null; then
     gcloud secrets create "${SECRET}" --replication-policy="automatic"
   fi
-  # Ensure Cloud Run SA can read secret
   gcloud secrets add-iam-policy-binding "${SECRET}" \
     --member="serviceAccount:${SERVICE_ACCOUNT}" \
     --role="roles/secretmanager.secretAccessor"
 done
 
-echo "=== [6/7] Provisioning Cloud Tasks Queue ==="
+echo "=== [7/8] Provisioning Cloud Tasks Queue with OIDC Authorization ==="
 if ! gcloud tasks queues describe "${TASK_QUEUE}" --location="${REGION}" &>/dev/null; then
   gcloud tasks queues create "${TASK_QUEUE}" \
     --location="${REGION}" \
@@ -101,8 +113,7 @@ if ! gcloud tasks queues describe "${TASK_QUEUE}" --location="${REGION}" &>/dev/
     --max-attempts=5
 fi
 
-echo "=== [7/7] Provisioning Cloud Scheduler Retention Job ==="
-# Determine Cloud Run URL
+echo "=== [8/8] Provisioning Cloud Scheduler Retention Job with OIDC Token ==="
 SERVICE_URL=$(gcloud run services describe invoiceready-prod --region="${REGION}" --format="value(status.url)" 2>/dev/null || echo "https://invoiceready-prod-epvy5srfb5ewhdo7mgmmu7-212282537635.asia-east1.run.app")
 
 if ! gcloud scheduler jobs describe "${SCHEDULER_JOB}" --location="${REGION}" &>/dev/null; then
