@@ -38,8 +38,8 @@ export class DatabaseService {
   /**
    * Initializes PostgreSQL connection and runs DDL schema migrations.
    */
-  public static async initialize(): Promise<void> {
-    if (this.initialized && this.client) return;
+  public static async initialize(forceCheck = false): Promise<void> {
+    if (this.initialized && this.client && !forceCheck) return;
 
     // 1. Check for Cloud SQL / PostgreSQL environment variables
     const isPlaceholder = Boolean(
@@ -261,7 +261,12 @@ export class DatabaseService {
   public static async resolveUserAndTenant(
     firebaseUid: string,
     email: string,
-    fullName: string
+    fullName: string,
+    options?: {
+      emailVerified?: boolean;
+      isAnonymous?: boolean;
+      allowAutoOrgCreation?: boolean;
+    }
   ): Promise<{
     userId: string;
     firebaseUid: string;
@@ -272,6 +277,12 @@ export class DatabaseService {
   }> {
     await this.initialize();
     const client = this.client!;
+    const isProd = process.env.NODE_ENV === 'production';
+
+    // Requirement 6: Require verified identity/email in production where applicable
+    if (isProd && !options?.isAnonymous && options?.emailVerified === false) {
+      throw new Error('Email verification required in production prior to tenant account access.');
+    }
 
     // 1. Query user by firebase_uid
     const userRes = await client.query(
@@ -284,6 +295,11 @@ export class DatabaseService {
     let role: 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER' = 'ANALYST';
 
     if (userRes.rows.length === 0) {
+      // Requirement 6: Explicitly control automatic organization creation
+      if (options?.allowAutoOrgCreation === false) {
+        throw new Error('Automatic organization creation is disabled. User must be explicitly invited to an organization.');
+      }
+
       userId = `usr_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
       orgId = `org_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
       const memberId = `mem_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;

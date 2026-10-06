@@ -39,6 +39,24 @@ export class CloudStorageService {
   }
 
   /**
+   * Verifies production bucket availability (Requirement 3)
+   */
+  public static async verifyProductionBuckets(): Promise<void> {
+    const gcs = this.getStorage();
+    if (!gcs) {
+      throw new Error('FATAL: Google Cloud Storage client could not be initialized in production.');
+    }
+    const [qExists] = await gcs.bucket(this.QUARANTINE_BUCKET).exists();
+    if (!qExists) {
+      throw new Error(`FATAL: Quarantine bucket '${this.QUARANTINE_BUCKET}' does not exist in target GCP project.`);
+    }
+    const [pExists] = await gcs.bucket(this.PRIVATE_BUCKET).exists();
+    if (!pExists) {
+      throw new Error(`FATAL: Private documents bucket '${this.PRIVATE_BUCKET}' does not exist in target GCP project.`);
+    }
+  }
+
+  /**
    * Saves uploaded binary buffer to the quarantine bucket immediately (Requirement 14, 7)
    */
   public static async saveToQuarantine(

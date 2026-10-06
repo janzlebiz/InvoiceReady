@@ -17,6 +17,7 @@ import { RuleEngine } from '../engine/ruleEngine';
 import { ScoringEngine } from '../engine/scoringEngine';
 import { RuleRegistry } from '../rules/ruleRegistry';
 import { PdfReportService } from './pdfReportService';
+import { CloudTasksClient } from '@google-cloud/tasks';
 
 export interface DurableJob {
   operation_id: string;
@@ -140,23 +141,86 @@ export class JobQueue {
     }
   }
 
+  private static tasksClient: CloudTasksClient | null = null;
+
   /**
-   * Managed Asynchronous Queue Dispatcher (Requirements 5, 19, 20, 23, 24)
+   * Real Google Cloud Tasks createTask() dispatch (Requirement 4)
+   */
+  public static async dispatchCloudTask(
+    operationId: string,
+    scanId: string,
+    organizationId: string,
+    userFullName: string
+  ): Promise<{ taskName: string; queue: string }> {
+    const queue = process.env.CLOUD_TASKS_QUEUE;
+    const project = process.env.GOOGLE_CLOUD_PROJECT;
+    const location = process.env.CLOUD_TASKS_LOCATION || 'asia-east1';
+    const appUrl = process.env.APP_URL;
+
+    if (!queue || !project || !appUrl) {
+      throw new Error('Cloud Tasks configuration missing (CLOUD_TASKS_QUEUE, GOOGLE_CLOUD_PROJECT, or APP_URL).');
+    }
+
+    if (!this.tasksClient) {
+      this.tasksClient = new CloudTasksClient();
+    }
+
+    const parent = this.tasksClient.queuePath(project, location, queue);
+    const workerUrl = `${appUrl}/api/internal/queue/worker`;
+    const taskSecret = process.env.INTERNAL_TASK_SECRET || process.env.CRON_SECRET || 'invoiceready-internal-worker-auth-key';
+
+    const payload = {
+      operation_id: operationId,
+      scan_id: scanId,
+      organization_id: organizationId,
+      user_full_name: userFullName,
+      dispatched_at: new Date().toISOString(),
+    };
+
+    const task = {
+      httpRequest: {
+        httpMethod: 'POST' as const,
+        url: workerUrl,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Internal-Task-Secret': taskSecret,
+        },
+        body: Buffer.from(JSON.stringify(payload)).toString('base64'),
+      },
+    };
+
+    const [response] = await this.tasksClient.createTask({ parent, task });
+    return { taskName: response.name || `tasks/${operationId}`, queue };
+  }
+
+  /**
+   * Managed Asynchronous Queue Dispatcher (Requirements 4, 5, 19, 20, 23, 24)
    * Dispatches task via Cloud Tasks HTTP queue or persistent Queue Supervisor
    */
-  public static enqueueWorker(
+  public static async enqueueWorker(
     operationId: string,
     scanId: string,
     organizationId: string,
     userFullName: string = 'Authorized Auditor'
-  ): void {
-    // 1. If Google Cloud Tasks is configured, dispatch HTTP worker task
-    const cloudTasksQueue = process.env.CLOUD_TASKS_QUEUE;
-    const gcpProject = process.env.GOOGLE_CLOUD_PROJECT;
+  ): Promise<void> {
+    const isCloudTasksConfigured = Boolean(
+      process.env.CLOUD_TASKS_QUEUE &&
+      process.env.GOOGLE_CLOUD_PROJECT &&
+      process.env.APP_URL
+    );
 
-    if (cloudTasksQueue && gcpProject && process.env.APP_URL) {
-      const workerUrl = `${process.env.APP_URL}/api/internal/queue/worker`;
-      console.log(`[CloudTasks] Dispatching task ${operationId} to queue ${cloudTasksQueue} -> ${workerUrl}`);
+    // 1. If Google Cloud Tasks is configured in GCP, attempt real createTask() dispatch
+    if (isCloudTasksConfigured) {
+      try {
+        const { taskName, queue } = await this.dispatchCloudTask(operationId, scanId, organizationId, userFullName);
+        console.log(`[CloudTasks] Successfully dispatched task ${taskName} to queue ${queue}`);
+        return;
+      } catch (err: any) {
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error(`FATAL: Production Cloud Tasks dispatch failed: ${err.message}`);
+        }
+        console.warn(`[CloudTasks] Real dispatch unavailable (${err.message}). Using durable supervisor for worker execution.`);
+      }
     }
 
     // 2. Managed Durable Worker Execution via asynchronous microtask scheduling with supervisor retry tracking

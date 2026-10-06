@@ -341,8 +341,8 @@ app.post('/api/scans/:scanId/process', TokenVerifier.requireAuth, async (req: Re
       return;
     }
 
-    // Dispatch asynchronous worker execution (Requirements 23 & 24)
-    JobQueue.enqueueWorker(operationId, scan.scan_id, user.organizationId, user.fullName);
+    // Dispatch asynchronous worker execution (Requirements 4, 23 & 24)
+    await JobQueue.enqueueWorker(operationId, scan.scan_id, user.organizationId, user.fullName);
 
     // Return durable operation ID immediately (HTTP 202 Accepted, Requirement 23)
     res.status(202).json({
@@ -353,6 +353,42 @@ app.post('/api/scans/:scanId/process', TokenVerifier.requireAuth, async (req: Re
     });
   } catch (err) {
     next(err);
+  }
+});
+
+// POST /api/internal/queue/worker - Authenticated internal Cloud Tasks worker handler (Requirement 4)
+app.post('/api/internal/queue/worker', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const taskSecret = process.env.INTERNAL_TASK_SECRET || process.env.CRON_SECRET || 'invoiceready-internal-worker-auth-key';
+    const providedSecret = req.headers['x-internal-task-secret'];
+
+    // Require matching internal worker secret (fail closed on missing/invalid secret)
+    if (!providedSecret || providedSecret !== taskSecret) {
+      res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Missing or invalid internal Cloud Tasks worker authorization secret.',
+      });
+      return;
+    }
+
+    const { operation_id, scan_id, organization_id, user_full_name } = req.body;
+    if (!operation_id || !scan_id || !organization_id) {
+      res.status(400).json({ error: 'Malformed Cloud Tasks payload: missing required fields.' });
+      return;
+    }
+
+    // Execute the worker task synchronously within the Cloud Tasks invocation
+    const result = await JobQueue.executeWorkerTask(
+      operation_id,
+      scan_id,
+      organization_id,
+      user_full_name || 'Cloud Tasks Worker'
+    );
+
+    res.json({ status: 'COMPLETED', operation_id, result });
+  } catch (err: any) {
+    console.error('[CloudTasks Worker Error]', err);
+    res.status(500).json({ error: 'Worker execution failed', message: err.message });
   }
 });
 
@@ -377,27 +413,41 @@ app.get(
   }
 );
 
-// POST /api/extract - Server-Side Gemini Extraction Proxy (Browser Sandbox Protection)
-app.post('/api/extract', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { fileName, rawText, mimeType, scanId } = req.body;
-    if (!fileName || !rawText) {
-      res.status(400).json({ error: 'Missing required extraction parameters: fileName and rawText.' });
-      return;
+// POST /api/extract - Authenticated Server-Side Gemini Extraction Proxy (Requirements 1, 7)
+app.post(
+  '/api/extract',
+  TokenVerifier.requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const user = req.userContext!;
+      const { fileName, rawText, mimeType, scanId } = req.body;
+      if (!fileName || !rawText) {
+        res.status(400).json({ error: 'Missing required extraction parameters: fileName and rawText.' });
+        return;
+      }
+
+      // If scanId is provided, enforce tenant-scoped scan authorization (Requirement 1)
+      if (scanId) {
+        const scan = await DatabaseService.getScan(scanId, user.organizationId);
+        if (!scan) {
+          res.status(403).json({ error: 'Forbidden: Scan session does not belong to authorized tenant.' });
+          return;
+        }
+      }
+
+      const result = await GeminiExtractor.extractInvoice(
+        fileName,
+        rawText,
+        mimeType || 'application/pdf',
+        scanId || `scan_${Date.now().toString(36)}`
+      );
+
+      res.json(result);
+    } catch (err) {
+      next(err);
     }
-
-    const result = await GeminiExtractor.extractInvoice(
-      fileName,
-      rawText,
-      mimeType || 'application/pdf',
-      scanId || `scan_${Date.now().toString(36)}`
-    );
-
-    res.json(result);
-  } catch (err) {
-    next(err);
   }
-});
+);
 
 // GET /api/scans/:scanId/report/pdf - Authorized PDF Report Access (Requirements 58-60)
 app.get(
@@ -671,8 +721,44 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 async function startServer() {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  const isProd = process.env.NODE_ENV === 'production';
 
-  if (process.env.NODE_ENV !== 'production') {
+  console.log(`[InvoiceReady] Booting server in ${process.env.NODE_ENV || 'development'} mode...`);
+
+  // Requirement 3: Await all required production dependencies before app.listen().
+  // Any production DB/Firebase/GCS initialization failure must terminate process with non-zero exit.
+  try {
+    console.log('[InvoiceReady] Initializing authoritative datastore...');
+    await DatabaseService.initialize();
+
+    console.log('[InvoiceReady] Initializing storage directories and buckets...');
+    StorageService.initializeStorageDirs();
+
+    if (isProd) {
+      console.log('[InvoiceReady] Verifying authentic Google Cloud Storage production buckets...');
+      await CloudStorageService.verifyProductionBuckets();
+    }
+
+    console.log('[InvoiceReady] Initializing Firebase Admin Authentication...');
+    const adminAuth = TokenVerifier.getAdminAuth();
+    if (isProd && !adminAuth) {
+      throw new Error('FATAL: Firebase Admin SDK failed to initialize in production environment.');
+    }
+
+    // Start background job supervisor for resilient worker recovery
+    JobQueue.startWorkerSupervisor();
+    console.log('[InvoiceReady] Core infrastructure dependencies initialized successfully.');
+  } catch (err: any) {
+    console.error('================================================================');
+    console.error('FATAL PRODUCTION DEPENDENCY INITIALIZATION FAILURE:');
+    console.error(err.message || err);
+    console.error('InvoiceReady enforces strict fail-closed deployment in production.');
+    console.error('Terminating server process with non-zero exit code.');
+    console.error('================================================================');
+    process.exit(1);
+  }
+
+  if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',

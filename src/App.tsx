@@ -23,6 +23,7 @@ import {
   ScanSession,
   ExtractionResult,
 } from './engine/types';
+import { getClientAuthHeader } from './services/firebaseClient';
 
 export const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<string>('landing');
@@ -112,7 +113,8 @@ export const App: React.FC = () => {
    * Every result is derived server-side and fetched from /api/scans/:scanId.
    */
   const executeServerProcessingPipeline = async (): Promise<ScanSession> => {
-    const authHeader = { Authorization: 'Bearer dev_preview_token' };
+    // Real Firebase client authentication (Requirement 5)
+    const authHeader = await getClientAuthHeader();
 
     // 1. Create Scan Session in PostgreSQL
     const createScanResp = await fetch('/api/scans', {

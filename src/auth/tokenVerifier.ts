@@ -33,6 +33,14 @@ declare global {
   }
 }
 
+export interface VerifiedUserClaims {
+  uid: string;
+  email: string;
+  name: string;
+  emailVerified: boolean;
+  isAnonymous: boolean;
+}
+
 export class TokenVerifier {
   private static adminAuth: Auth | null = null;
   private static JWT_TEST_SECRET = process.env.JWT_SECRET || 'invoiceready-test-only-secret-2026';
@@ -68,7 +76,7 @@ export class TokenVerifier {
    */
   public static async verifyToken(
     token: string
-  ): Promise<{ uid: string; email: string; name: string } | null> {
+  ): Promise<VerifiedUserClaims | null> {
     // 1. In production, strictly verify cryptographically using Firebase Admin SDK (Requirement 8)
     if (process.env.NODE_ENV === 'production') {
       const admin = this.getAdminAuth();
@@ -77,10 +85,13 @@ export class TokenVerifier {
       }
       try {
         const decoded = await admin.verifyIdToken(token);
+        const isAnonymous = decoded.firebase?.sign_in_provider === 'anonymous';
         return {
           uid: decoded.uid,
           email: decoded.email || `${decoded.uid}@firebase.internal`,
-          name: decoded.name || 'Firebase User',
+          name: decoded.name || (isAnonymous ? 'Guest Auditor' : 'Firebase User'),
+          emailVerified: Boolean(decoded.email_verified),
+          isAnonymous,
         };
       } catch (err) {
         return null;
@@ -93,19 +104,24 @@ export class TokenVerifier {
       if (admin) {
         try {
           const decoded = await admin.verifyIdToken(token);
+          const isAnonymous = decoded.firebase?.sign_in_provider === 'anonymous';
           return {
             uid: decoded.uid,
             email: decoded.email || `${decoded.uid}@firebase.internal`,
-            name: decoded.name || 'Firebase User',
+            name: decoded.name || (isAnonymous ? 'Guest Auditor' : 'Firebase User'),
+            emailVerified: Boolean(decoded.email_verified),
+            isAnonymous,
           };
         } catch (_) {}
       }
 
-      if (token === 'dev_preview_token') {
+      if (process.env.ALLOW_TEST_AUTH === 'true' && token === 'dev_preview_token') {
         return {
           uid: 'usr_dev_auditor_01',
           email: 'auditor@invoiceready.internal',
           name: 'Lead Compliance Auditor',
+          emailVerified: true,
+          isAnonymous: false,
         };
       }
 
@@ -123,7 +139,13 @@ export class TokenVerifier {
         const name = decoded.name || decoded.displayName || 'Authorized User';
 
         if (!uid) return null;
-        return { uid, email, name };
+        return {
+          uid,
+          email,
+          name,
+          emailVerified: true,
+          isAnonymous: false,
+        };
       } catch (err) {
         return null;
       }
@@ -185,11 +207,16 @@ export class TokenVerifier {
     }
 
     try {
-      // Authoritative server-side derivation in PostgreSQL (Requirement 11)
+      // Authoritative server-side derivation in PostgreSQL (Requirement 6, 11)
       const userContext = await DatabaseService.resolveUserAndTenant(
         claims.uid,
         claims.email,
-        claims.name
+        claims.name,
+        {
+          emailVerified: claims.emailVerified,
+          isAnonymous: claims.isAnonymous,
+          allowAutoOrgCreation: true,
+        }
       );
 
       if (!userContext) {

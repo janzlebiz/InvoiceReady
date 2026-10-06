@@ -11,13 +11,10 @@
  */
 
 import crypto from 'crypto';
+import { ProductionMalwareScanner, MalwareScanResult } from './malwareScanner';
 
-export interface MalwareScanResult {
-  status: 'CLEAN' | 'INFECTED' | 'SUSPICIOUS' | 'ERROR';
-  scannerName: string;
-  threatName?: string;
-  scanTimestamp: string;
-}
+export { ProductionMalwareScanner };
+export type { MalwareScanResult };
 
 export interface SecurityInspectionResult {
   passed: boolean;
@@ -33,43 +30,6 @@ export interface SecurityInspectionResult {
   rejectionReason?: string;
   inspectedAt: string;
   malwareScanResult: MalwareScanResult;
-}
-
-/**
- * Production Antivirus / Malware Scanner Abstraction (Requirement 32)
- */
-export class ProductionMalwareScanner {
-  public static async scan(buffer: Buffer, fileName: string): Promise<MalwareScanResult> {
-    const scanTimestamp = new Date().toISOString();
-
-    // 1. Check for EICAR standard antivirus test signature
-    const eicarSignature = 'X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*';
-    if (buffer.toString('utf8').includes(eicarSignature)) {
-      return {
-        status: 'INFECTED',
-        scannerName: 'CloudSecurityScanner-v1.0',
-        threatName: 'EICAR-Test-Signature',
-        scanTimestamp,
-      };
-    }
-
-    // 2. Integration point for external ClamAV daemon / Google Web Risk API / VirusTotal API
-    if (process.env.CLAMAV_HOST && process.env.CLAMAV_PORT) {
-      try {
-        // External daemon socket stream inspection
-        console.log(`Submitting ${fileName} to remote ClamAV daemon at ${process.env.CLAMAV_HOST}...`);
-      } catch (err: any) {
-        console.warn('ClamAV scan error:', err.message);
-      }
-    }
-
-    // Default clean result for authenticated files passing all signature checks
-    return {
-      status: 'CLEAN',
-      scannerName: 'InvoiceReady-Enterprise-Malware-Engine-v2.0',
-      scanTimestamp,
-    };
-  }
 }
 
 export class SecurityScanner {
@@ -227,7 +187,7 @@ export class SecurityScanner {
     const malwareClean = malwareResult.status === 'CLEAN';
 
     if (!malwareClean) {
-      findings.push(`Malware Scanner Flag: ${malwareResult.threatName || 'Suspicious payload detected'}.`);
+      findings.push(`Malware Scanner Flag: ${malwareResult.threatName || malwareResult.errorMessage || 'Suspicious payload detected'}.`);
     }
 
     // 5. Prompt Injection Defense (Section 45)
