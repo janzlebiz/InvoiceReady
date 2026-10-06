@@ -177,6 +177,13 @@ export class JobQueue {
       }
     }
 
+    const serviceAccountEmail = process.env.CLOUD_TASKS_SERVICE_ACCOUNT || process.env.SCHEDULER_SERVICE_ACCOUNT;
+    const audience = process.env.CLOUD_TASKS_AUDIENCE || process.env.SCHEDULER_AUDIENCE || workerUrl;
+
+    if (process.env.NODE_ENV === 'production' && (!serviceAccountEmail || !audience)) {
+      throw new Error('FATAL: Production mode requires CLOUD_TASKS_SERVICE_ACCOUNT and CLOUD_TASKS_AUDIENCE to be configured.');
+    }
+
     const payload = {
       operation_id: operationId,
       scan_id: scanId,
@@ -194,6 +201,12 @@ export class JobQueue {
           'X-Internal-Task-Secret': taskSecret || '',
         },
         body: Buffer.from(JSON.stringify(payload)).toString('base64'),
+        ...(serviceAccountEmail && audience ? {
+          oidcToken: {
+            serviceAccountEmail,
+            audience,
+          },
+        } : {}),
       },
     };
 

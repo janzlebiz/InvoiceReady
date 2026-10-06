@@ -60,16 +60,12 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
-// Helper: Extract real trusted client IP using trust proxy (Pre-GA Item 4)
+// Helper: Extract real trusted client IP using trusted Express proxy resolution (GA Blocker Item 5)
 function getClientIp(req: Request): string {
   if (req.ips && req.ips.length > 0) {
     return req.ips[0].trim();
   }
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.length > 0) {
-    return forwarded.split(',')[0].trim();
-  }
-  return req.socket.remoteAddress || req.ip || '127.0.0.1';
+  return req.ip || '127.0.0.1';
 }
 
 // Initialize upload handler (Requirement 8)
@@ -82,20 +78,9 @@ const upload = multer({
 // 1. AUTHENTICATION ENDPOINTS (Requirements 7-12)
 // ---------------------------------------------------------------------------
 
-// POST /api/auth/token - Test token generation strictly registered only in development/test mode (Requirement 1, 4)
-if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_TEST_AUTH === 'true') {
+// POST /api/auth/token - Never registered when NODE_ENV=production (GA Blocker Item 6)
+if (process.env.NODE_ENV !== 'production') {
   app.post('/api/auth/token', (req: Request, res: Response) => {
-    const isProduction = process.env.NODE_ENV === 'production';
-    const allowTestAuth = process.env.ALLOW_TEST_AUTH === 'true';
-
-    if (isProduction && !allowTestAuth) {
-      res.status(403).json({
-        error: 'Forbidden',
-        message: 'Token generation endpoint is disabled in production. Authenticate via Firebase Authentication.',
-      });
-      return;
-    }
-
     const { uid, email, name } = req.body;
     if (!uid || !email) {
       res.status(400).json({ error: 'Missing required credentials (uid and email).' });
