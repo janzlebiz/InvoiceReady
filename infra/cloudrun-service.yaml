@@ -1,0 +1,80 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: invoiceready-prod
+  namespace: gen-lang-client-0427039673
+  labels:
+    cloud.googleapis.com/location: asia-east1
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/client-name: gcloud
+        run.googleapis.com/cloudsql-instances: gen-lang-client-0427039673:asia-east1:invoiceready-postgres
+        run.googleapis.com/execution-environment: gen2
+    spec:
+      serviceAccountName: invoiceready-runner@gen-lang-client-0427039673.iam.gserviceaccount.com
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+      - image: gcr.io/gen-lang-client-0427039673/invoiceready:v1.0-RC2
+        ports:
+        - name: http1
+          containerPort: 3000
+        resources:
+          limits:
+            cpu: "2000m"
+            memory: "2Gi"
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: GCP_PROJECT_ID
+          value: "gen-lang-client-0427039673"
+        - name: GCP_REGION
+          value: "asia-east1"
+        - name: GCS_QUARANTINE_BUCKET
+          value: "gen-lang-client-0427039673-quarantine"
+        - name: GCS_DOCUMENTS_BUCKET
+          value: "gen-lang-client-0427039673-documents"
+        - name: CLOUD_TASKS_QUEUE
+          value: "invoiceready-task-queue"
+        - name: SCHEDULER_SERVICE_ACCOUNT
+          value: "invoiceready-runner@gen-lang-client-0427039673.iam.gserviceaccount.com"
+        - name: SCHEDULER_AUDIENCE
+          value: "https://invoiceready-prod-epvy5srfb5ewhdo7mgmmu7-212282537635.asia-east1.run.app"
+        - name: CLOUD_TASKS_SERVICE_ACCOUNT
+          value: "invoiceready-runner@gen-lang-client-0427039673.iam.gserviceaccount.com"
+        - name: CLOUD_TASKS_AUDIENCE
+          value: "https://invoiceready-prod-epvy5srfb5ewhdo7mgmmu7-212282537635.asia-east1.run.app"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: DATABASE_URL
+              key: latest
+        - name: INTERNAL_TASK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: INTERNAL_TASK_SECRET
+              key: latest
+        - name: CRON_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: CRON_SECRET
+              key: latest
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: GEMINI_API_KEY
+              key: latest
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          periodSeconds: 15
