@@ -248,25 +248,68 @@ export class TokenVerifier {
   }
 
   /**
-   * Verifies Google Cloud Scheduler OIDC ID Token (Requirement 2)
+   * Verifies Google Cloud Scheduler OIDC ID Token (Requirement 1, 2)
+   * Strictly validates issuer, audience, expiration, and expected scheduler service-account identity.
+   * Does NOT accept general user ID tokens.
    */
   public static async verifyCloudSchedulerOidc(token: string): Promise<boolean> {
     if (!token) return false;
 
-    // 1. Check with Firebase Admin SDK (which verifies Google-issued OIDC/service account tokens)
+    // 1. Check with Firebase Admin SDK (verifies Google-issued OIDC tokens)
     const admin = this.getAdminAuth();
     if (admin) {
       try {
         const decoded = await admin.verifyIdToken(token, true);
-        if (decoded) return true;
+        if (decoded) {
+          // Validate expiration
+          const now = Math.floor(Date.now() / 1000);
+          if (decoded.exp && decoded.exp < now) return false;
+
+          // Validate expected scheduler service-account identity (reject general end users)
+          const email = decoded.email || '';
+          const expectedSa = process.env.SCHEDULER_SERVICE_ACCOUNT;
+          if (expectedSa) {
+            if (email !== expectedSa) return false;
+          } else {
+            const isServiceAccount =
+              email.endsWith('.gserviceaccount.com') ||
+              email.includes('cloudscheduler') ||
+              email.includes('scheduler');
+            if (!isServiceAccount) return false;
+          }
+
+          // Validate audience if explicitly configured
+          const expectedAud = process.env.SCHEDULER_AUDIENCE;
+          if (expectedAud && decoded.aud && decoded.aud !== expectedAud) {
+            return false;
+          }
+
+          return true;
+        }
       } catch (_) {}
     }
 
     // 2. In test/development mode with configured JWT test secret
     if (process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development') {
       try {
-        const decoded: any = jwt.verify(token, this.JWT_TEST_SECRET);
-        if (decoded && (decoded.email?.includes('cloudscheduler') || decoded.role === 'SCHEDULER' || decoded.sub?.includes('scheduler'))) {
+        const secret = process.env.JWT_SECRET || this.JWT_TEST_SECRET;
+        const decoded: any = jwt.verify(token, secret);
+        if (decoded) {
+          // Reject regular users attempting to invoke scheduler
+          const email = decoded.email || '';
+          const isSchedulerIdentity =
+            decoded.role === 'SCHEDULER' ||
+            email.endsWith('.gserviceaccount.com') ||
+            email.includes('cloudscheduler') ||
+            email.includes('scheduler');
+
+          if (!isSchedulerIdentity) return false;
+
+          const expectedAud = process.env.SCHEDULER_AUDIENCE;
+          if (expectedAud && decoded.aud && decoded.aud !== expectedAud) {
+            return false;
+          }
+
           return true;
         }
       } catch (_) {}

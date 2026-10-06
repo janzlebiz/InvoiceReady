@@ -62,28 +62,30 @@ const upload = multer({
 // 1. AUTHENTICATION ENDPOINTS (Requirements 7-12)
 // ---------------------------------------------------------------------------
 
-// POST /api/auth/token - Test token generation strictly disabled in production (Requirements 7, 8, 12)
-app.post('/api/auth/token', (req: Request, res: Response) => {
-  const isProduction = process.env.NODE_ENV === 'production';
-  const allowTestAuth = process.env.ALLOW_TEST_AUTH === 'true';
+// POST /api/auth/token - Test token generation strictly registered only in development/test mode (Requirement 1, 4)
+if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_TEST_AUTH === 'true') {
+  app.post('/api/auth/token', (req: Request, res: Response) => {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const allowTestAuth = process.env.ALLOW_TEST_AUTH === 'true';
 
-  if (isProduction && !allowTestAuth) {
-    res.status(403).json({
-      error: 'Forbidden',
-      message: 'Token generation endpoint is disabled in production. Authenticate via Firebase Authentication.',
-    });
-    return;
-  }
+    if (isProduction && !allowTestAuth) {
+      res.status(403).json({
+        error: 'Forbidden',
+        message: 'Token generation endpoint is disabled in production. Authenticate via Firebase Authentication.',
+      });
+      return;
+    }
 
-  const { uid, email, name } = req.body;
-  if (!uid || !email) {
-    res.status(400).json({ error: 'Missing required credentials (uid and email).' });
-    return;
-  }
+    const { uid, email, name } = req.body;
+    if (!uid || !email) {
+      res.status(400).json({ error: 'Missing required credentials (uid and email).' });
+      return;
+    }
 
-  const token = TokenVerifier.generateTestToken(uid, email, name || 'Authorized User');
-  res.json({ token, token_type: 'Bearer', expires_in: 7200 });
-});
+    const token = TokenVerifier.generateTestToken(uid, email, name || 'Authorized User');
+    res.json({ token, token_type: 'Bearer', expires_in: 7200 });
+  });
+}
 
 // GET /api/auth/me - Retrieve current authenticated context (Derived server-side from PostgreSQL)
 app.get('/api/auth/me', TokenVerifier.requireAuth, (req: Request, res: Response) => {

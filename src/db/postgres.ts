@@ -339,7 +339,12 @@ export class DatabaseService {
         orgId = memRes.rows[0].organization_id;
         role = memRes.rows[0].role as any;
       } else {
-        // Fallback provision org for orphan user
+        // Requirement: Existing users without an active membership must receive onboarding-required
+        if (options?.allowAutoOrgCreation === false) {
+          throw new Error('User does not belong to an active organization. Organization onboarding required.');
+        }
+
+        // Fallback provision org only in non-production/permissive test environments
         orgId = `org_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
         await client.query(
           'INSERT INTO organizations (organization_id, name, country_code) VALUES ($1, $2, $3)',
@@ -629,6 +634,7 @@ export class DatabaseService {
            updated_at = NOW()
        WHERE operation_id = $3
          AND organization_id = $4
+         AND attempt_count < max_attempts
          AND (
            status = 'QUEUED'
            OR (status = 'PROCESSING' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
