@@ -126,7 +126,8 @@ export class JobQueue {
     try {
       const pendingJobs = await DatabaseService.getPendingQueueJobs();
       for (const job of pendingJobs) {
-        if (job.status === 'QUEUED' || (job.status === 'PROCESSING' && job.attempt_count < 3)) {
+        const maxAttempts = job.max_attempts || 3;
+        if (job.status === 'QUEUED' || (job.status === 'PROCESSING' && job.attempt_count < maxAttempts)) {
           await this.executeWorkerTask(
             job.operation_id,
             job.scan_id,

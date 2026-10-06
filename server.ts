@@ -41,12 +41,32 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '25mb' }));
 
-// Helper: Extract real trusted client IP (Requirement 39)
+// Production Startup Hardening Checks (Pre-GA Item 3)
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.SCHEDULER_SERVICE_ACCOUNT || !process.env.SCHEDULER_AUDIENCE) {
+    console.error('FATAL: Production mode requires SCHEDULER_SERVICE_ACCOUNT and SCHEDULER_AUDIENCE to be configured.');
+    process.exit(1);
+  }
+  if (!process.env.INTERNAL_TASK_SECRET) {
+    console.error('FATAL: Production mode requires INTERNAL_TASK_SECRET to be configured.');
+    process.exit(1);
+  }
+  if (!process.env.CRON_SECRET) {
+    console.error('FATAL: Production mode requires CRON_SECRET to be configured.');
+    process.exit(1);
+  }
+}
+
+// Helper: Extract real trusted client IP using trust proxy (Pre-GA Item 4)
 function getClientIp(req: Request): string {
+  if (req.ips && req.ips.length > 0) {
+    return req.ips[0].trim();
+  }
   const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
     return forwarded.split(',')[0].trim();
   }
   return req.socket.remoteAddress || req.ip || '127.0.0.1';
@@ -353,7 +373,7 @@ app.post('/api/scans/:scanId/process', TokenVerifier.requireAuth, async (req: Re
   }
 });
 
-// POST /api/internal/queue/worker - Authenticated internal Cloud Tasks worker handler (Requirements 1, 4)
+// POST /api/internal/queue/worker - Authenticated internal Cloud Tasks worker handler (Pre-GA Item 5)
 app.post('/api/internal/queue/worker', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const taskSecret = process.env.INTERNAL_TASK_SECRET;
@@ -361,25 +381,36 @@ app.post('/api/internal/queue/worker', async (req: Request, res: Response, next:
     const authHeader = req.headers.authorization;
 
     // Fail closed in production if secret is not configured
-    if (!taskSecret) {
-      if (process.env.NODE_ENV === 'production') {
-        res.status(500).json({
-          error: 'ConfigurationError',
-          message: 'FATAL: INTERNAL_TASK_SECRET is not configured in production.',
-        });
-        return;
+    if (!taskSecret && process.env.NODE_ENV === 'production') {
+      res.status(500).json({
+        error: 'ConfigurationError',
+        message: 'FATAL: INTERNAL_TASK_SECRET is not configured in production.',
+      });
+      return;
+    }
+
+    let isAuthorized = false;
+
+    // 1. Primary production authentication: Google Cloud Tasks / Cloud Run OIDC service-account token
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      if (taskSecret && token === taskSecret) {
+        isAuthorized = true;
+      } else {
+        isAuthorized = await TokenVerifier.verifyCloudSchedulerOidc(token);
       }
     }
 
-    const isSecretMatch = Boolean(
-      taskSecret && (providedSecret === taskSecret || authHeader === `Bearer ${taskSecret}`)
-    );
+    // 2. Defense-in-depth: X-Internal-Task-Secret header match
+    if (!isAuthorized && providedSecret && taskSecret && providedSecret === taskSecret) {
+      isAuthorized = true;
+    }
 
-    // Require matching internal worker secret (fail closed on missing/invalid secret)
-    if (!isSecretMatch) {
+    // Require matching OIDC service account token or defense-in-depth secret
+    if (!isAuthorized) {
       res.status(401).json({
         error: 'Unauthorized',
-        message: 'Missing or invalid internal Cloud Tasks worker authorization secret.',
+        message: 'Missing or invalid Cloud Tasks OIDC service-account token or internal task secret.',
       });
       return;
     }

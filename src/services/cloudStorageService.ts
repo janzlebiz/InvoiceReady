@@ -235,8 +235,15 @@ export class CloudStorageService {
         });
         return signedUrl;
       } catch (err: any) {
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error(`FATAL: Production GCS signed URL generation failed: ${err.message}`);
+        }
         console.warn('Could not generate GCS signed URL:', err.message);
       }
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('FATAL: Production mode requires authentic Google Cloud Storage signed URLs.');
     }
 
     // Secure application proxy path for local dev/testing
