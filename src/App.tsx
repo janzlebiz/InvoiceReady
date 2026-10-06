@@ -22,33 +22,29 @@ import {
   SystemProfile,
   ScanSession,
   ExtractionResult,
-  CanonicalInvoice,
-  ExtractedFieldEvidence,
 } from './engine/types';
-import { RuleRegistry } from './rules/ruleRegistry';
-import { ApplicabilityEngine } from './engine/applicabilityEngine';
-import { RuleEngine } from './engine/ruleEngine';
-import { ScoringEngine } from './engine/scoringEngine';
-import { ClientExtractor } from './services/clientExtractor';
-import { SAMPLE_INVOICES } from './engine/sampleInvoices';
 
 export const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<string>('landing');
   const [testSuiteOpen, setTestSuiteOpen] = useState<boolean>(false);
   const [traceabilityOpen, setTraceabilityOpen] = useState<boolean>(false);
 
-  // Assessment flow states
+  // User & Administrative context (Requirement 13: Hide Test Suite from normal users)
+  const [userRole, setUserRole] = useState<'VIEWER' | 'ANALYST' | 'ADMIN' | 'OWNER'>('ANALYST');
+  const isAdminOrOwner = userRole === 'ADMIN' || userRole === 'OWNER';
+
+  // Assessment flow states (Requirement 2: Zero default sample/demo business data)
   const [selectedJurisdiction, setSelectedJurisdiction] = useState<JurisdictionCode>('AE');
 
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile>({
-    id: 'bp_session',
+    id: `bp_${Date.now().toString(36)}`,
     organization_id: 'org_main',
     country: 'AE',
-    business_name: 'Al-Noor Technologies Trading LLC',
-    trade_name: 'Al-Noor Tech',
-    tax_identifier: '100456789012345',
+    business_name: '',
+    trade_name: '',
+    tax_identifier: '',
     vat_registered: true,
-    revenue_band: 'ABOVE_50M_AED',
+    revenue_band: 'BELOW_50M_AED',
     transaction_types: ['B2B'],
     branch_count: 1,
     created_at: new Date().toISOString(),
@@ -56,47 +52,44 @@ export const App: React.FC = () => {
   });
 
   const [systemProfile, setSystemProfile] = useState<SystemProfile>({
-    id: 'sys_session',
+    id: `sys_${Date.now().toString(36)}`,
     organization_id: 'org_main',
     accounting_system: 'CUSTOM_ERP',
     invoicing_system: 'CUSTOM_ERP',
-    current_invoice_format: 'XML_UBL',
-    structured_export_capability: true,
-    electronic_transmission_capability: true,
-    asp_partner_selected: true,
+    current_invoice_format: 'PDF',
+    structured_export_capability: false,
+    electronic_transmission_capability: false,
+    asp_partner_selected: false,
+    cas_permit_active: false,
     number_of_invoice_templates: 1,
   });
 
+  // Zero default preloaded invoice (Requirement 2 & 10)
   const [uploadedDocument, setUploadedDocument] = useState<{
+    file?: File;
     fileName: string;
     fileSize: number;
     mimeType: string;
-    rawText: string;
-  }>({
-    fileName: 'AE-COMPLIANT-B2B.pdf',
-    fileSize: 4200,
-    mimeType: 'application/pdf',
-    rawText: SAMPLE_INVOICES[0].rawDocumentText,
-  });
+    rawText?: string;
+  } | null>(null);
 
   const [currentExtraction, setCurrentExtraction] = useState<ExtractionResult | null>(null);
   const [currentScan, setCurrentScan] = useState<ScanSession | null>(null);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
 
-  // Transition handlers
+  // Transition handlers (Requirement 2: Clean jurisdiction switch without synthetic business data)
   const handleSelectJurisdiction = (jur: JurisdictionCode) => {
     setSelectedJurisdiction(jur);
     setBusinessProfile((prev) => ({
       ...prev,
       country: jur,
-      business_name: jur === 'AE' ? 'Al-Noor Technologies Trading LLC' : 'Manila Enterprise Systems Inc.',
-      tax_identifier: jur === 'AE' ? '100456789012345' : '004-987-654-00000',
-      revenue_band: jur === 'AE' ? 'ABOVE_50M_AED' : 'ABOVE_1B_PHP',
-      taxpayer_category: jur === 'AE' ? undefined : 'LTS',
+      revenue_band: jur === 'AE' ? 'BELOW_50M_AED' : 'MICRO_BELOW_3M_PHP',
+      taxpayer_category: undefined,
     }));
     setSystemProfile((prev) => ({
       ...prev,
-      asp_partner_selected: jur === 'AE',
-      cas_permit_active: jur === 'PH',
+      asp_partner_selected: false,
+      cas_permit_active: false,
     }));
   };
 
@@ -105,74 +98,135 @@ export const App: React.FC = () => {
   };
 
   const handleStartProcessing = () => {
+    if (!uploadedDocument) {
+      setPipelineError('Please select or upload an invoice document before proceeding.');
+      return;
+    }
+    setPipelineError(null);
     setCurrentView('processing');
   };
 
-  const handleProcessingComplete = async () => {
-    // Run live server extraction or client-safe parser
-    const scanId = `scan_${Date.now().toString(36)}`;
-    const extraction = await ClientExtractor.extractInvoice(
-      uploadedDocument.fileName,
-      uploadedDocument.rawText,
-      uploadedDocument.mimeType,
-      scanId
-    );
-    setCurrentExtraction(extraction);
-    setCurrentView('extraction-review');
+  /**
+   * Authoritative Server-Side Processing Pipeline (Requirements 3, 4, 10)
+   * The browser NEVER independently calculates legal compliance or scorecard results.
+   * Every result is derived server-side and fetched from /api/scans/:scanId.
+   */
+  const executeServerProcessingPipeline = async (): Promise<ScanSession> => {
+    const authHeader = { Authorization: 'Bearer dev_preview_token' };
+
+    // 1. Create Scan Session in PostgreSQL
+    const createScanResp = await fetch('/api/scans', {
+      method: 'POST',
+      headers: { ...authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jurisdiction: selectedJurisdiction,
+        business_profile: {
+          ...businessProfile,
+          business_name: businessProfile.business_name || 'Assessed Organization LLC',
+          tax_identifier: businessProfile.tax_identifier || (selectedJurisdiction === 'AE' ? '100456789012345' : '123-456-789-00000'),
+        },
+        system_profile: systemProfile,
+      }),
+    });
+
+    if (!createScanResp.ok) {
+      const err = await createScanResp.json().catch(() => ({}));
+      throw new Error(err.error || `Failed to initialize scan session (HTTP ${createScanResp.status})`);
+    }
+
+    const createdScan = await createScanResp.json();
+    const scanId = createdScan.scan_id;
+
+    // 2. Upload Actual Binary Document (Multipart / Form-Data) to Server Quarantine & Storage
+    if (uploadedDocument) {
+      const formData = new FormData();
+      if (uploadedDocument.file) {
+        formData.append('file', uploadedDocument.file, uploadedDocument.fileName);
+      } else {
+        const blob = new Blob([uploadedDocument.rawText || ''], {
+          type: uploadedDocument.mimeType || 'application/pdf',
+        });
+        formData.append('file', blob, uploadedDocument.fileName);
+      }
+
+      const uploadResp = await fetch(`/api/scans/${scanId}/documents`, {
+        method: 'POST',
+        headers: authHeader,
+        body: formData,
+      });
+
+      if (!uploadResp.ok) {
+        const uploadErr = await uploadResp.json().catch(() => ({}));
+        throw new Error(uploadErr.error || `Security validation or file upload rejected (HTTP ${uploadResp.status})`);
+      }
+    }
+
+    // 3. Dispatch Server Processing Worker via Asynchronous Queue (Requirements 5, 23, 24)
+    const procResp = await fetch(`/api/scans/${scanId}/process`, {
+      method: 'POST',
+      headers: { ...authHeader, 'Content-Type': 'application/json' },
+    });
+
+    if (!procResp.ok && procResp.status !== 202) {
+      const procErr = await procResp.json().catch(() => ({}));
+      throw new Error(procErr.error || `Failed to enqueue server processing (HTTP ${procResp.status})`);
+    }
+
+    // 4. Poll Authoritative Scan from PostgreSQL via /api/scans/:scanId (Requirement 4)
+    const maxPollAttempts = 25;
+    for (let i = 0; i < maxPollAttempts; i++) {
+      await new Promise((r) => setTimeout(r, 650));
+      const scanPollResp = await fetch(`/api/scans/${scanId}`, {
+        headers: authHeader,
+      });
+      if (scanPollResp.ok) {
+        const fetchedScan: ScanSession = await scanPollResp.json();
+        if (
+          ['COMPLETED', 'REVIEW_REQUIRED', 'FAILED', 'SECURITY_REJECTED'].includes(
+            fetchedScan.status
+          )
+        ) {
+          return fetchedScan;
+        }
+      }
+    }
+
+    // Final fetch
+    const finalResp = await fetch(`/api/scans/${scanId}`, { headers: authHeader });
+    if (finalResp.ok) {
+      return await finalResp.json();
+    }
+    return createdScan;
   };
 
-  const handleConfirmExtraction = (
-    updatedInvoice: CanonicalInvoice,
-    updatedEvidence: Record<string, ExtractedFieldEvidence>
-  ) => {
-    const scanId = currentExtraction?.scan_id || `scan_${Date.now().toString(36)}`;
+  const handleProcessingComplete = async () => {
+    try {
+      const authoritativeScan = await executeServerProcessingPipeline();
+      setCurrentScan(authoritativeScan);
+      setCurrentExtraction(authoritativeScan.extraction_result || null);
 
-    // 1. Determine Applicability BEFORE scoring (TSD-020)
-    const applicability = ApplicabilityEngine.determineApplicability(
-      businessProfile,
-      systemProfile
-    );
+      if (
+        authoritativeScan.status === 'SECURITY_REJECTED' ||
+        authoritativeScan.status === 'FAILED'
+      ) {
+        setCurrentView('dashboard');
+      } else if (
+        authoritativeScan.extraction_result &&
+        authoritativeScan.status === 'REVIEW_REQUIRED'
+      ) {
+        setCurrentView('extraction-review');
+      } else {
+        setCurrentView('dashboard');
+      }
+    } catch (err: any) {
+      console.error('Server assessment pipeline error:', err);
+      setPipelineError(err.message || 'Server assessment pipeline failed.');
+      setCurrentView('upload');
+    }
+  };
 
-    // 2. Deterministic rule validation
-    const execution = RuleEngine.executeRules(
-      applicability.applicable_rules,
-      updatedInvoice,
-      businessProfile,
-      systemProfile,
-      updatedEvidence
-    );
-
-    // 3. Readiness Scoring & Critical Gates
-    const scorecard = ScoringEngine.calculateScorecard(
-      execution.validationResults,
-      execution.findings,
-      applicability.applicable_rules.length
-    );
-
-    const scanSession: ScanSession = {
-      scan_id: scanId,
-      organization_id: businessProfile.organization_id,
-      jurisdiction: businessProfile.country,
-      business_profile: businessProfile,
-      system_profile: systemProfile,
-      status: 'COMPLETED',
-      document_name: uploadedDocument.fileName,
-      document_size_bytes: uploadedDocument.fileSize,
-      document_mime_type: uploadedDocument.mimeType,
-      document_hash: `sha256:${Date.now().toString(36)}`,
-      storage_path: `/storage/${uploadedDocument.fileName}`,
-      uploaded_at: new Date().toISOString(),
-      completed_at: new Date().toISOString(),
-      extraction_result: currentExtraction || undefined,
-      applicable_rules: applicability.applicable_rules.map((r) => r.rule_id),
-      validation_results: execution.validationResults,
-      scorecard: scorecard,
-      findings: execution.findings,
-      remediation_plan: execution.remediationActions,
-      rule_pack_version: RuleRegistry.getPackVersion(businessProfile.country),
-    };
-
-    setCurrentScan(scanSession);
+  const handleConfirmExtraction = () => {
+    // Assessment results are authoritatively stored in PostgreSQL scan; transition to dashboard
     setCurrentView('dashboard');
   };
 
@@ -190,6 +244,7 @@ export const App: React.FC = () => {
         onNavigate={(view) => setCurrentView(view)}
         onOpenTests={() => setTestSuiteOpen(true)}
         onOpenTraceability={() => setTraceabilityOpen(true)}
+        isAdmin={isAdminOrOwner}
       />
 
       {/* Main View Router */}
@@ -234,17 +289,29 @@ export const App: React.FC = () => {
         )}
 
         {currentView === 'upload' && (
-          <InvoiceUpload
-            jurisdiction={selectedJurisdiction}
-            onFileSelected={(data) => setUploadedDocument(data)}
-            onContinue={handleStartProcessing}
-            onBack={() => setCurrentView('system-assessment')}
-          />
+          <div className="space-y-4">
+            {pipelineError && (
+              <div className="max-w-3xl mx-auto px-4 mt-6">
+                <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-medium">
+                  {pipelineError}
+                </div>
+              </div>
+            )}
+            <InvoiceUpload
+              jurisdiction={selectedJurisdiction}
+              onFileSelected={(data) => {
+                setUploadedDocument(data);
+                setPipelineError(null);
+              }}
+              onContinue={handleStartProcessing}
+              onBack={() => setCurrentView('system-assessment')}
+            />
+          </div>
         )}
 
         {currentView === 'processing' && (
           <ProcessingScreen
-            documentName={uploadedDocument.fileName}
+            documentName={uploadedDocument?.fileName || 'invoice.pdf'}
             onProcessingComplete={handleProcessingComplete}
           />
         )}
@@ -289,22 +356,40 @@ export const App: React.FC = () => {
           <ReportScreen
             scan={currentScan}
             scorecard={currentScan.scorecard}
-            onDeleteScan={handleDeleteScan}
+            onBackToDashboard={() => setCurrentView('dashboard')}
             onStartNewScan={handleStartAssessment}
+            onDeleteScan={handleDeleteScan}
           />
         )}
 
-        {currentView === 'admin' && <AdminConsole />}
+        {currentView === 'admin' && (
+          <AdminConsole
+            onBackToDashboard={() => setCurrentView('landing')}
+          />
+        )}
 
-        {currentView === 'privacy' && <PrivacyCenter />}
+        {currentView === 'privacy' && (
+          <PrivacyCenter
+            onBackToDashboard={() => setCurrentView('landing')}
+          />
+        )}
       </main>
 
-      {/* Test Suite Modal */}
-      <TestSuiteModal isOpen={testSuiteOpen} onClose={() => setTestSuiteOpen(false)} />
+      {/* Behavioral & Regulatory Test Suite Modal (Restricted to Authorized Admin/Owner) */}
+      {isAdminOrOwner && (
+        <TestSuiteModal
+          isOpen={testSuiteOpen}
+          onClose={() => setTestSuiteOpen(false)}
+        />
+      )}
 
-      {/* Traceability Matrix Modal */}
-      <TraceabilityMatrix isOpen={traceabilityOpen} onClose={() => setTraceabilityOpen(false)} />
+      {/* Authoritative Regulatory Traceability Matrix Modal */}
+      <TraceabilityMatrix
+        isOpen={traceabilityOpen}
+        onClose={() => setTraceabilityOpen(false)}
+      />
     </div>
   );
 };
+
 export default App;

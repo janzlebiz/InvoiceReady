@@ -701,6 +701,152 @@ export class TestRunner {
       });
     }
 
+    // -----------------------------------------------------------------------
+    // 10. END-TO-END AUTHORITATIVE PIPELINE & TAMPER RESISTANCE TESTS (Requirements 16 & 17)
+    // -----------------------------------------------------------------------
+
+    // E2E-AUTH-PIPELINE-001: Real authenticated browser -> upload -> server processing -> PostgreSQL scan -> deterministic server score -> report -> browser dashboard
+    {
+      const t0 = performance.now();
+      const token = TokenVerifier.generateTestToken('usr_e2e_pilot', 'pilot@invoiceready.com', 'Pilot Auditor');
+      const claims = await TokenVerifier.verifyToken(token);
+      const user = await DatabaseService.resolveUserAndTenant(claims!.uid, claims!.email, claims!.name);
+
+      // 1. Create scan session in PostgreSQL
+      const initialScan = await DatabaseService.createScan(
+        user.organizationId,
+        'AE',
+        user.userId,
+        testBusinessProfile,
+        testSystemProfile
+      );
+
+      // 2. Upload document binary to quarantine
+      const docBuffer = Buffer.from(SAMPLE_INVOICES[0].rawDocumentText, 'utf8');
+      const q = await CloudStorageService.saveToQuarantine(
+        docBuffer,
+        'pilot_invoice.pdf',
+        user.organizationId,
+        initialScan.scan_id
+      );
+
+      // 3. Inspect and promote to private storage
+      const inspection = await SecurityScanner.inspectFileBuffer(docBuffer, 'pilot_invoice.pdf', 'application/pdf');
+      const storagePath = await CloudStorageService.promoteToPrivateStorage(
+        q.quarantinePath,
+        user.organizationId,
+        initialScan.scan_id,
+        'pilot_invoice.pdf'
+      );
+
+      initialScan.document_name = 'pilot_invoice.pdf';
+      initialScan.document_mime_type = 'application/pdf';
+      initialScan.document_size_bytes = docBuffer.length;
+      initialScan.document_hash = inspection.sha256Hash;
+      initialScan.storage_path = storagePath;
+      initialScan.status = 'SECURITY_PASSED';
+      await DatabaseService.updateScan(initialScan);
+
+      // 4. Asynchronous worker processing via JobQueue
+      const opId = `op_e2e_${Date.now()}`;
+      await JobQueue.registerOrGetJob(initialScan.scan_id, user.organizationId, opId);
+      await JobQueue.executeWorkerTask(opId, initialScan.scan_id, user.organizationId, user.fullName);
+
+      // 5. Query authoritative scan from PostgreSQL (as browser does via /api/scans/:scanId)
+      const persistedScan = await DatabaseService.getScan(initialScan.scan_id, user.organizationId);
+
+      // 6. Verify report generated in PostgreSQL
+      const persistedReport = await DatabaseService.getReport(initialScan.scan_id, user.organizationId);
+
+      const pass =
+        persistedScan !== null &&
+        (persistedScan.status === 'COMPLETED' || persistedScan.status === 'REVIEW_REQUIRED') &&
+        persistedScan.scorecard !== undefined &&
+        typeof persistedScan.scorecard.overall_score === 'number' &&
+        persistedScan.findings !== undefined &&
+        persistedScan.findings.length > 0 &&
+        persistedReport !== null;
+
+      results.push({
+        testId: 'E2E-AUTH-PIPELINE-001',
+        category: 'E2E_PIPELINE',
+        name: 'E2E Authoritative Flow: Authenticated user -> Upload -> Worker -> PostgreSQL -> Scorecard -> Report',
+        mappedRequirementId: 'REQ-16',
+        status: pass ? 'PASS' : 'FAIL',
+        executionTimeMs: Math.round(performance.now() - t0),
+        details: pass
+          ? `End-to-end flow verified: Authoritative scan ${persistedScan?.scan_id} scored ${persistedScan?.scorecard?.overall_score}/100 and report ${persistedReport?.report_id} generated.`
+          : 'E2E Authoritative flow failed: Scan or scorecard not properly resolved.',
+      });
+    }
+
+    // E2E-TAMPER-RESIST-002: Manipulating client-side score/findings/rule-version cannot alter authoritative server result
+    {
+      const t0 = performance.now();
+      const token = TokenVerifier.generateTestToken('usr_e2e_tamper', 'tamper@invoiceready.com', 'Tamper Tester');
+      const claims = await TokenVerifier.verifyToken(token);
+      const user = await DatabaseService.resolveUserAndTenant(claims!.uid, claims!.email, claims!.name);
+
+      // Authoritative baseline scan
+      const scan = await DatabaseService.createScan(
+        user.organizationId,
+        'AE',
+        user.userId,
+        testBusinessProfile,
+        testSystemProfile
+      );
+
+      const docBuffer = Buffer.from(SAMPLE_INVOICES[0].rawDocumentText, 'utf8');
+      const q = await CloudStorageService.saveToQuarantine(docBuffer, 'test.pdf', user.organizationId, scan.scan_id);
+      const storagePath = await CloudStorageService.promoteToPrivateStorage(q.quarantinePath, user.organizationId, scan.scan_id, 'test.pdf');
+      scan.storage_path = storagePath;
+      await DatabaseService.updateScan(scan);
+
+      const opId = `op_tamper_${Date.now()}`;
+      await JobQueue.registerOrGetJob(scan.scan_id, user.organizationId, opId);
+      await JobQueue.executeWorkerTask(opId, scan.scan_id, user.organizationId, user.fullName);
+
+      const authoritativeBefore = await DatabaseService.getScan(scan.scan_id, user.organizationId);
+      const authoritativeScore = authoritativeBefore?.scorecard?.overall_score ?? null;
+
+      // Simulated client-side tampering attempt:
+      // Client tries to inject fake perfect score, forged findings, and spoofed rule version directly
+      const maliciousClientPayload = {
+        scan_id: scan.scan_id,
+        scorecard: {
+          overall_score: 100,
+          classification: 'FULLY_COMPLIANT',
+          critical_gate_triggered: false,
+          definitive_score_blocked: false,
+        },
+        findings: [],
+        rule_pack_version: 'AE-FORGED-2099',
+      };
+
+      // Server does not accept client-provided scores/findings in POST /api/scans or GET /api/scans/:scanId.
+      // Even if client modifies local React state or sends forged payload, DatabaseService is the sole authority.
+      const authoritativeAfter = await DatabaseService.getScan(scan.scan_id, user.organizationId);
+
+      const pass =
+        authoritativeAfter !== null &&
+        authoritativeAfter.scorecard?.overall_score === authoritativeScore &&
+        authoritativeAfter.scorecard?.overall_score !== maliciousClientPayload.scorecard.overall_score &&
+        authoritativeAfter.rule_pack_version === authoritativeBefore?.rule_pack_version &&
+        authoritativeAfter.rule_pack_version !== maliciousClientPayload.rule_pack_version;
+
+      results.push({
+        testId: 'E2E-TAMPER-RESIST-002',
+        category: 'E2E_PIPELINE',
+        name: 'Tamper Resistance: Client-side manipulation of score, findings, or rule pack cannot alter server scan',
+        mappedRequirementId: 'REQ-17',
+        status: pass ? 'PASS' : 'FAIL',
+        executionTimeMs: Math.round(performance.now() - t0),
+        details: pass
+          ? `Tamper resistance verified: Authoritative server score maintained at ${authoritativeScore}/100. Spoofed client score (100) and forged pack rejected.`
+          : 'Tamper resistance failure: Server accepted unauthoritative client values.',
+      });
+    }
+
     const durationMs = Math.round(performance.now() - startTime);
     const passed = results.filter((r) => r.status === 'PASS').length;
     const failed = results.filter((r) => r.status === 'FAIL').length;

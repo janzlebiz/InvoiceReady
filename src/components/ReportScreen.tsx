@@ -17,6 +17,7 @@ interface ReportScreenProps {
   scorecard: Scorecard;
   onDeleteScan: () => void;
   onStartNewScan: () => void;
+  onBackToDashboard?: () => void;
 }
 
 export const ReportScreen: React.FC<ReportScreenProps> = ({
@@ -24,6 +25,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
   scorecard,
   onDeleteScan,
   onStartNewScan,
+  onBackToDashboard,
 }) => {
   const isUAE = scan.jurisdiction === 'AE';
 
@@ -45,6 +47,15 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
         </div>
 
         <div className="flex items-center gap-3">
+          {onBackToDashboard && (
+            <button
+              onClick={onBackToDashboard}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors"
+            >
+              <span>Dashboard</span>
+            </button>
+          )}
+
           <button
             onClick={onDeleteScan}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors"

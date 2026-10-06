@@ -87,7 +87,7 @@ export const PH_RULES: RegulatoryRule[] = [
     points_allocated: 15,
     evaluateApplicability: (profile) => profile.country === 'PH',
     evaluateRule: (invoice) => {
-      const sellerTin = invoice.seller.tax_id ? invoice.seller.tax_id.replace(/\s|-/g, '') : null;
+      const sellerTin = invoice.seller.tax_id ? String(invoice.seller.tax_id).replace(/\s|-/g, '') : null;
       const branchCode = invoice.seller.branch_code;
 
       if (!sellerTin) {

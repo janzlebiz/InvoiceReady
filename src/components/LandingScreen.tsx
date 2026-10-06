@@ -1,4 +1,5 @@
 import React from 'react';
+import { RuleRegistry } from '../rules/ruleRegistry';
 import {
   Shield,
   FileCheck2,
@@ -23,15 +24,18 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   onExploreJurisdiction,
   onOpenHowItWorks,
 }) => {
+  const aeActiveVersion = RuleRegistry.getActivePackVersion('AE');
+  const phActiveVersion = RuleRegistry.getActivePackVersion('PH');
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-between">
       {/* Hero Section */}
       <section className="pt-16 pb-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full">
         <div className="text-center max-w-3xl mx-auto space-y-6">
-          {/* Status Kicker */}
+          {/* Status Kicker - Dynamic Rule-Pack Versions (Requirement 14) */}
           <div className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 px-3 py-1.5 rounded-full shadow-xs">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>Versioned Regulatory Rule Packs: UAE 2026.1 & Philippines 2026.1 Active</span>
+            <span>Versioned Regulatory Rule Packs: {aeActiveVersion} &amp; {phActiveVersion} Active</span>
           </div>
 
           <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight text-slate-900 text-balance leading-tight">

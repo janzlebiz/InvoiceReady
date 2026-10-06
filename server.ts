@@ -627,35 +627,28 @@ app.get(
 // 6. TEST SUITE RUNNER ENDPOINT (Requirements 41-45)
 // ---------------------------------------------------------------------------
 
-// POST /api/tests/run - Gated behind ADMIN authorization in production (Requirement 44)
-app.post('/api/tests/run', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const isProd = process.env.NODE_ENV === 'production';
-    if (isProd) {
-      // In production, require valid token and ADMIN role
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        res.status(401).json({ error: 'Unauthorized: Admin authentication required in production.' });
-        return;
-      }
-      const claims = await TokenVerifier.verifyToken(authHeader.split(' ')[1]);
-      if (!claims) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-      const user = await DatabaseService.resolveUserAndTenant(claims.uid, claims.email, claims.name);
+// POST /api/tests/run - Gated behind ADMIN/OWNER authorization (Requirement 13 & 44)
+app.post(
+  '/api/tests/run',
+  TokenVerifier.requireAuth,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const user = req.userContext!;
       if (user.role !== 'ADMIN' && user.role !== 'OWNER') {
-        res.status(403).json({ error: 'Forbidden: Admin role required to run production test suite.' });
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Admin or Owner authorization required to execute test suite.',
+        });
         return;
       }
-    }
 
-    const results = await TestRunner.runBehavioralTestSuite();
-    res.json(results);
-  } catch (err) {
-    next(err);
+      const results = await TestRunner.runBehavioralTestSuite();
+      res.json(results);
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 // ---------------------------------------------------------------------------
 // 7. GLOBAL SANITIZED ERROR HANDLER (Requirement 45)

@@ -540,7 +540,7 @@ export interface AuditLogEntry {
 
 export interface TestCaseResult {
   testId: string;
-  category: 'SECURITY' | 'TENANT_ISOLATION' | 'REGULATORY' | 'CRITICAL_GATE' | 'AI_EXTRACTION' | 'PRIVACY';
+  category: 'SECURITY' | 'TENANT_ISOLATION' | 'REGULATORY' | 'CRITICAL_GATE' | 'AI_EXTRACTION' | 'PRIVACY' | 'E2E_PIPELINE';
   name: string;
   mappedRequirementId: string;
   status: 'PASS' | 'FAIL';

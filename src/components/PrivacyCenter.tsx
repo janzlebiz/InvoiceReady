@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { Shield, Lock, Download, Trash2, CheckCircle2, Clock, EyeOff } from 'lucide-react';
+import { Shield, Lock, Download, Trash2, CheckCircle2, Clock, EyeOff, ArrowLeft } from 'lucide-react';
 
-export const PrivacyCenter: React.FC = () => {
+interface PrivacyCenterProps {
+  onBackToDashboard?: () => void;
+}
+
+export const PrivacyCenter: React.FC<PrivacyCenterProps> = ({ onBackToDashboard }) => {
   const [preferences, setPreferences] = useState({
     necessary: true, // Immutable
     preferences: true,
@@ -41,16 +45,27 @@ export const PrivacyCenter: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-12 space-y-8">
-      <div>
-        <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Privacy by Design · Sections 35, 36, 50, 51
-        </span>
-        <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
-          Privacy Rights &amp; Retention Center
-        </h2>
-        <p className="text-sm text-slate-600 mt-1">
-          Control your data processing consents, audit document retention windows, and execute immediate data exports or deletions.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Privacy by Design · Sections 35, 36, 50, 51
+          </span>
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+            Privacy Rights &amp; Retention Center
+          </h2>
+          <p className="text-sm text-slate-600 mt-1">
+            Control your data processing consents, audit document retention windows, and execute immediate data exports or deletions.
+          </p>
+        </div>
+        {onBackToDashboard && (
+          <button
+            onClick={onBackToDashboard}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-xl hover:bg-slate-50 shadow-xs transition"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Home
+          </button>
+        )}
       </div>
 
       {/* Retention Schedule (Section 35) */}

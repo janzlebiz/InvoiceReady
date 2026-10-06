@@ -40,36 +40,40 @@ export class TokenVerifier {
   /**
    * Initializes Firebase Admin SDK if not already initialized
    */
-  private static getAdminAuth(): Auth | null {
+  public static getAdminAuth(): Auth | null {
     if (this.adminAuth) return this.adminAuth;
 
     try {
       if (getApps().length === 0) {
-        const projectId = process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT || 'invoiceready-prod';
-        initializeApp({ projectId });
+        const projectId = process.env.FIREBASE_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+        if (process.env.NODE_ENV === 'production' && !projectId) {
+          throw new Error('FIREBASE_PROJECT_ID or GOOGLE_CLOUD_PROJECT must be configured in production.');
+        }
+        initializeApp({ projectId: projectId || 'invoiceready-prod' });
       }
       this.adminAuth = getAuth();
       return this.adminAuth;
     } catch (err: any) {
-      // In local container without GCP ADC credentials, fallback to test verifier
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(
+          `FATAL: Firebase Admin SDK initialization failed in production mode: ${err.message}. Never silently enter test mode.`
+        );
+      }
       return null;
     }
   }
 
   /**
-   * Verifies Firebase ID Token server-side (Requirement 9, 10, 12)
+   * Verifies Firebase ID Token server-side (Requirement 8, 9, 10)
    */
   public static async verifyToken(
     token: string
   ): Promise<{ uid: string; email: string; name: string } | null> {
-    const isProduction = process.env.NODE_ENV === 'production' && process.env.ALLOW_TEST_AUTH !== 'true';
-
-    // 1. In production, strictly verify cryptographically using Firebase Admin SDK
-    if (isProduction) {
+    // 1. In production, strictly verify cryptographically using Firebase Admin SDK (Requirement 8)
+    if (process.env.NODE_ENV === 'production') {
       const admin = this.getAdminAuth();
       if (!admin) {
-        console.error('Firebase Admin not initialized in production environment.');
-        return null;
+        throw new Error('FATAL: Firebase Admin authentication not initialized in production mode.');
       }
       try {
         const decoded = await admin.verifyIdToken(token);
@@ -83,43 +87,59 @@ export class TokenVerifier {
       }
     }
 
-    // 2. Development / Test Mode Path (Requirement 12)
-    // First try Firebase Admin if available and token is a valid Firebase token
-    const admin = this.getAdminAuth();
-    if (admin) {
-      try {
-        const decoded = await admin.verifyIdToken(token);
+    // 2. In development, accept Firebase token or authenticated dev session token
+    if (process.env.NODE_ENV === 'development') {
+      const admin = this.getAdminAuth();
+      if (admin) {
+        try {
+          const decoded = await admin.verifyIdToken(token);
+          return {
+            uid: decoded.uid,
+            email: decoded.email || `${decoded.uid}@firebase.internal`,
+            name: decoded.name || 'Firebase User',
+          };
+        } catch (_) {}
+      }
+
+      if (token === 'dev_preview_token') {
         return {
-          uid: decoded.uid,
-          email: decoded.email || `${decoded.uid}@firebase.internal`,
-          name: decoded.name || 'Firebase User',
+          uid: 'usr_dev_auditor_01',
+          email: 'auditor@invoiceready.internal',
+          name: 'Lead Compliance Auditor',
         };
-      } catch (_) {
-        // Fall through to test token verification
+      }
+
+      return null;
+    }
+
+    // 3. Test Mode Path (strictly active ONLY when NODE_ENV === 'test') (Requirement 9)
+    if (process.env.NODE_ENV === 'test') {
+      try {
+        const decoded: any = jwt.verify(token, this.JWT_TEST_SECRET);
+        if (!decoded) return null;
+
+        const uid = decoded.user_id || decoded.sub || decoded.uid;
+        const email = decoded.email || `${uid}@invoiceready.internal`;
+        const name = decoded.name || decoded.displayName || 'Authorized User';
+
+        if (!uid) return null;
+        return { uid, email, name };
+      } catch (err) {
+        return null;
       }
     }
 
-    // Verify signature with test secret (in dev/test mode only)
-    try {
-      const decoded: any = jwt.verify(token, this.JWT_TEST_SECRET);
-      if (!decoded) return null;
-
-      const uid = decoded.user_id || decoded.sub || decoded.uid;
-      const email = decoded.email || `${uid}@invoiceready.internal`;
-      const name = decoded.name || decoded.displayName || 'Authorized User';
-
-      if (!uid) return null;
-      return { uid, email, name };
-    } catch (err) {
-      return null;
-    }
+    return null;
   }
 
   /**
-   * Generates a signed token for automated integration test execution ONLY (Requirement 12)
-   * Impossible to use in production because verifyToken requires Firebase Admin verification in production.
+   * Generates a signed token for automated integration test execution ONLY (Requirement 9)
+   * Strictly restricted to NODE_ENV === 'test'.
    */
   public static generateTestToken(uid: string, email: string, name: string): string {
+    if (process.env.NODE_ENV !== 'test') {
+      throw new Error('Test token generation is strictly forbidden outside of NODE_ENV === "test".');
+    }
     return jwt.sign(
       {
         uid,

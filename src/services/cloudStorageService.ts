@@ -39,7 +39,7 @@ export class CloudStorageService {
   }
 
   /**
-   * Saves uploaded binary buffer to the quarantine bucket immediately (Requirement 14)
+   * Saves uploaded binary buffer to the quarantine bucket immediately (Requirement 14, 7)
    */
   public static async saveToQuarantine(
     buffer: Buffer,
@@ -51,7 +51,18 @@ export class CloudStorageService {
     const safeName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
     const objectKey = `${organizationId}/${scanId}/quarantine_${Date.now()}_${safeName}`;
 
+    // Requirement 7: In production, require real Google Cloud Storage. Do not fall back to the in-memory storage mock.
+    if (process.env.NODE_ENV === 'production' && !process.env.GOOGLE_CLOUD_PROJECT) {
+      throw new Error(
+        'FATAL: Production mode requires authentic Google Cloud Storage with GOOGLE_CLOUD_PROJECT. In-memory storage mock is strictly prohibited in production.'
+      );
+    }
+
     const gcs = this.getStorage();
+    if (process.env.NODE_ENV === 'production' && !gcs) {
+      throw new Error('FATAL: Google Cloud Storage client could not be initialized in production mode.');
+    }
+
     if (gcs && process.env.GOOGLE_CLOUD_PROJECT) {
       try {
         const bucket = gcs.bucket(this.QUARANTINE_BUCKET);
@@ -69,17 +80,20 @@ export class CloudStorageService {
         });
         return { quarantinePath: objectKey, sha256Hash };
       } catch (err: any) {
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error(`FATAL: Production GCS quarantine upload failed: ${err.message}`);
+        }
         console.warn('GCS quarantine upload fallback to local storage:', err.message);
       }
     }
 
-    // Ephemeral object store
+    // Ephemeral object store strictly permitted ONLY in development/test environments
     this.localMockStore.set(`quarantine://${objectKey}`, buffer);
     return { quarantinePath: objectKey, sha256Hash };
   }
 
   /**
-   * Promotes file from quarantine bucket to private secured bucket upon CLEAN scan (Requirement 14)
+   * Promotes file from quarantine bucket to private secured bucket upon CLEAN scan (Requirement 14, 7)
    */
   public static async promoteToPrivateStorage(
     quarantinePath: string,
@@ -91,6 +105,10 @@ export class CloudStorageService {
     const targetKey = `${organizationId}/${scanId}/original/${safeName}`;
 
     const gcs = this.getStorage();
+    if (process.env.NODE_ENV === 'production' && !gcs) {
+      throw new Error('FATAL: Google Cloud Storage client could not be initialized in production mode.');
+    }
+
     if (gcs && process.env.GOOGLE_CLOUD_PROJECT) {
       try {
         const srcBucket = gcs.bucket(this.QUARANTINE_BUCKET);
@@ -103,11 +121,14 @@ export class CloudStorageService {
         await srcFile.delete().catch(() => {});
         return targetKey;
       } catch (err: any) {
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error(`FATAL: Production GCS promotion failed: ${err.message}`);
+        }
         console.warn('GCS promotion fallback to local storage:', err.message);
       }
     }
 
-    // Ephemeral store promotion
+    // Ephemeral store promotion strictly permitted ONLY in development/test
     const buf = this.localMockStore.get(`quarantine://${quarantinePath}`);
     if (buf) {
       this.localMockStore.set(`private://${targetKey}`, buf);
@@ -118,10 +139,14 @@ export class CloudStorageService {
   }
 
   /**
-   * Reads private stored file buffer securely on server (Requirement 16)
+   * Reads private stored file buffer securely on server (Requirement 16, 7)
    */
   public static async readStoredFile(storagePath: string): Promise<Buffer | null> {
     const gcs = this.getStorage();
+    if (process.env.NODE_ENV === 'production' && !gcs) {
+      throw new Error('FATAL: Google Cloud Storage client could not be initialized in production mode.');
+    }
+
     if (gcs && process.env.GOOGLE_CLOUD_PROJECT) {
       try {
         const bucket = gcs.bucket(this.PRIVATE_BUCKET);
@@ -129,26 +154,41 @@ export class CloudStorageService {
         const [contents] = await file.download();
         return contents;
       } catch (err: any) {
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error(`FATAL: Production GCS download failed: ${err.message}`);
+        }
         console.warn('GCS download fallback to local storage:', err.message);
       }
+    }
+
+    if (process.env.NODE_ENV === 'production') {
+      return null;
     }
 
     return this.localMockStore.get(`private://${storagePath}`) || null;
   }
 
   /**
-   * Permanently deletes object from Cloud Storage (Requirements 17 & 27)
+   * Permanently deletes object from Cloud Storage (Requirements 17, 27, 7)
    */
   public static async deletePhysicalFile(storagePath: string): Promise<boolean> {
     let deleted = false;
     const gcs = this.getStorage();
+    if (process.env.NODE_ENV === 'production' && !gcs) {
+      throw new Error('FATAL: Google Cloud Storage client could not be initialized in production mode.');
+    }
+
     if (gcs && process.env.GOOGLE_CLOUD_PROJECT) {
       try {
         const bucket = gcs.bucket(this.PRIVATE_BUCKET);
         const file = bucket.file(storagePath);
         await file.delete();
         deleted = true;
-      } catch (_) {}
+      } catch (err: any) {
+        if (process.env.NODE_ENV === 'production') {
+          throw new Error(`FATAL: Production GCS file deletion failed: ${err.message}`);
+        }
+      }
     }
 
     if (this.localMockStore.has(`private://${storagePath}`)) {

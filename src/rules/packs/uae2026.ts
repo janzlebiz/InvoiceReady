@@ -86,7 +86,7 @@ export const UAE_RULES: RegulatoryRule[] = [
     points_allocated: 15,
     evaluateApplicability: (profile) => profile.country === 'AE' && profile.vat_registered,
     evaluateRule: (invoice, profile, system, evidenceMap) => {
-      const sellerTrn = invoice.seller.tax_id ? invoice.seller.tax_id.replace(/\s|-/g, '') : null;
+      const sellerTrn = invoice.seller.tax_id ? String(invoice.seller.tax_id).replace(/\s|-/g, '') : null;
       if (!sellerTrn) {
         return {
           state: 'FAIL',
@@ -147,7 +147,7 @@ export const UAE_RULES: RegulatoryRule[] = [
     evaluateApplicability: (profile) =>
       profile.country === 'AE' && profile.transaction_types.some((t) => t === 'B2B' || t === 'B2G'),
     evaluateRule: (invoice) => {
-      const buyerTrn = invoice.buyer.tax_id ? invoice.buyer.tax_id.replace(/\s|-/g, '') : null;
+      const buyerTrn = invoice.buyer.tax_id ? String(invoice.buyer.tax_id).replace(/\s|-/g, '') : null;
       if (!buyerTrn) {
         return {
           state: 'FAIL',

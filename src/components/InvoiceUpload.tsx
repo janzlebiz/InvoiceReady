@@ -15,11 +15,11 @@ import {
 interface InvoiceUploadProps {
   jurisdiction: 'AE' | 'PH';
   onFileSelected: (fileData: {
+    file?: File;
     fileName: string;
     fileSize: number;
     mimeType: string;
-    rawText: string;
-    base64?: string;
+    rawText?: string;
   }) => void;
   onContinue: () => void;
   onBack: () => void;
@@ -37,18 +37,23 @@ export const InvoiceUpload: React.FC<InvoiceUploadProps> = ({
   const [dragActive, setDragActive] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Filter sample templates for current jurisdiction
+  // Filter sample templates for current jurisdiction (Optional benchmark library)
   const relevantSamples = SAMPLE_INVOICES.filter(
     (s) => s.jurisdiction === jurisdiction || s.id === 'SEC-PROMPT-INJECTION-INVOICE'
   );
 
   const handleSelectSample = (sample: SampleInvoicePackage) => {
-    setSelectedFileName(`${sample.id}.pdf`);
-    setSelectedFileSize(sample.rawDocumentText.length * 2);
-    setPreviewSnippet(sample.rawDocumentText.slice(0, 320) + '...');
+    const fileName = `${sample.id}.pdf`;
+    const blob = new Blob([sample.rawDocumentText], { type: 'application/pdf' });
+    const syntheticFile = new File([blob], fileName, { type: 'application/pdf' });
+
+    setSelectedFileName(fileName);
+    setSelectedFileSize(blob.size);
+    setPreviewSnippet(`Sample Benchmark Selected: ${sample.name}\n(Will be processed via authoritative server pipeline)`);
     onFileSelected({
-      fileName: `${sample.id}.pdf`,
-      fileSize: sample.rawDocumentText.length * 2,
+      file: syntheticFile,
+      fileName,
+      fileSize: blob.size,
       mimeType: 'application/pdf',
       rawText: sample.rawDocumentText,
     });
@@ -57,19 +62,17 @@ export const InvoiceUpload: React.FC<InvoiceUploadProps> = ({
   const handleCustomFileUpload = (file: File) => {
     setSelectedFileName(file.name);
     setSelectedFileSize(file.size);
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = (e.target?.result as string) || '';
-      setPreviewSnippet(text.slice(0, 320) || `Binary file loaded (${file.name}, ${(file.size / 1024).toFixed(1)} KB)`);
-      onFileSelected({
-        fileName: file.name,
-        fileSize: file.size,
-        mimeType: file.type || 'application/pdf',
-        rawText: text,
-      });
-    };
-    reader.readAsText(file);
+    // Requirement 10: Require actual binary document processing server-side;
+    // Do not use browser readAsText() as the production invoice-processing path.
+    setPreviewSnippet(
+      `Binary document loaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB).\nPrepared for secure multipart upload to server quarantine & security inspection.`
+    );
+    onFileSelected({
+      file,
+      fileName: file.name,
+      fileSize: file.size,
+      mimeType: file.type || 'application/pdf',
+    });
   };
 
   const handleDrop = (e: React.DragEvent) => {

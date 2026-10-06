@@ -42,9 +42,24 @@ export class DatabaseService {
     if (this.initialized && this.client) return;
 
     // 1. Check for Cloud SQL / PostgreSQL environment variables
-    const hasCloudSqlEnv =
-      process.env.DATABASE_URL ||
-      (process.env.SQL_HOST && process.env.SQL_USER && process.env.SQL_DB_NAME);
+    const isPlaceholder = Boolean(
+      process.env.DATABASE_URL?.includes('PROJECT:REGION:INSTANCE') ||
+      process.env.DATABASE_URL?.includes('PASSWORD@')
+    );
+
+    const hasCloudSqlEnv = Boolean(
+      (process.env.DATABASE_URL && !isPlaceholder) ||
+      (process.env.SQL_HOST && process.env.SQL_USER && process.env.SQL_DB_NAME && !isPlaceholder)
+    );
+
+    // Requirement 6: In production, require real Cloud SQL PostgreSQL. Do not fall back to PGlite.
+    if (process.env.NODE_ENV === 'production') {
+      if (!hasCloudSqlEnv || isPlaceholder) {
+        throw new Error(
+          'FATAL: Production mode requires authoritative Cloud SQL PostgreSQL database (DATABASE_URL or SQL_HOST/USER/DB). PGlite fallback is strictly prohibited in production.'
+        );
+      }
+    }
 
     if (hasCloudSqlEnv) {
       try {
@@ -78,11 +93,11 @@ export class DatabaseService {
         };
         console.log('Connected to authoritative Cloud SQL PostgreSQL database.');
       } catch (err: any) {
-        console.error('Failed to connect to Cloud SQL PostgreSQL:', err.message);
+        console.error('Fatal: Failed to connect to Cloud SQL PostgreSQL in production:', err.message);
         throw err;
       }
     } else {
-      // 2. Authoritative PostgreSQL WebAssembly Engine (PGlite) for container/dev environments
+      // 2. Authoritative PostgreSQL WebAssembly Engine (PGlite) strictly permitted ONLY in development/test environments
       const pglite = new PGlite();
       this.client = {
         async query<T = any>(sql: string, params?: any[]) {
@@ -573,6 +588,14 @@ export class DatabaseService {
       [operationId, organizationId]
     );
     return res.rows[0] || null;
+  }
+
+  public static async getPendingQueueJobs(): Promise<any[]> {
+    await this.initialize();
+    const res = await this.client!.query(
+      `SELECT * FROM job_queue WHERE status = 'QUEUED' OR (status = 'PROCESSING' AND updated_at <= NOW() - INTERVAL '3 minutes') LIMIT 10`
+    );
+    return res.rows;
   }
 
   // -------------------------------------------------------------------------
