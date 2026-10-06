@@ -101,20 +101,29 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ onBackToDashboard })
       {activeTab === 'PACKS' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {packs.map((pack) => {
-            const rules = RuleRegistry.getRulesForJurisdiction(pack.jurisdiction);
+            const rules = RuleRegistry.getRulesForJurisdiction(pack.jurisdiction, pack.version);
             return (
               <div
-                key={pack.jurisdiction}
+                key={pack.version}
                 className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-xl">{pack.jurisdiction === 'AE' ? '🇦🇪' : '🇵🇭'}</span>
-                    <h3 className="text-base font-bold text-slate-900">
-                      {pack.jurisdiction === 'AE' ? 'United Arab Emirates' : 'Philippines'}
-                    </h3>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">
+                        {pack.jurisdiction === 'AE' ? 'United Arab Emirates' : 'Philippines'}
+                      </h3>
+                      <span className="text-xs font-mono text-slate-500">{pack.version}</span>
+                    </div>
                   </div>
-                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
+                  <span
+                    className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                      pack.status === 'PUBLISHED'
+                        ? 'text-emerald-800 bg-emerald-100'
+                        : 'text-amber-800 bg-amber-100'
+                    }`}
+                  >
                     {pack.status} (IMMUTABLE)
                   </span>
                 </div>

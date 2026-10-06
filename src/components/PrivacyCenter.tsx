@@ -198,6 +198,73 @@ export const PrivacyCenter: React.FC<PrivacyCenterProps> = ({ onBackToDashboard 
           )}
         </div>
       </div>
+
+      {/* Production Legal & Compliance Disclosures (Requirement 8) */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-xs space-y-6">
+        <div>
+          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+            Statutory Legal Framework &amp; Policies
+          </span>
+          <h3 className="text-lg font-bold text-slate-900 mt-1">
+            Production Legal Policies, Consent &amp; Disclaimers
+          </h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Governed under UAE Federal Decree-Law No. 45/2021 (PDPL) &amp; Philippines Republic Act No. 10173 (DPA 2012).
+          </p>
+        </div>
+
+        <div className="space-y-6 text-xs text-slate-600 leading-relaxed divide-y divide-slate-100">
+          <div className="pt-2">
+            <h4 className="font-bold text-slate-900 text-sm mb-1.5 flex items-center gap-2">
+              <Shield className="w-4 h-4 text-indigo-600" />
+              1. Privacy Policy &amp; Data Protection
+            </h4>
+            <p>
+              InvoiceReady processes document data strictly for automated tax compliance gap analysis. Original documents are stored in private isolated cloud storage and permanently wiped after 24 hours. Normalized metadata and scorecards are retained for 30 days before automated deletion. We do not sell or lease customer information. All tenant data is cryptographically hashed and isolated using row-level authorization.
+            </p>
+          </div>
+
+          <div className="pt-4">
+            <h4 className="font-bold text-slate-900 text-sm mb-1.5 flex items-center gap-2">
+              <Lock className="w-4 h-4 text-emerald-600" />
+              2. Terms of Service
+            </h4>
+            <p>
+              By accessing InvoiceReady, organizations confirm authorization to process uploaded financial documents. Services are provided on an authoritative automated audit framework. Users are responsible for safeguarding credentials and verifying recommended ERP configuration changes prior to live deployment.
+            </p>
+          </div>
+
+          <div className="pt-4">
+            <h4 className="font-bold text-slate-900 text-sm mb-1.5 flex items-center gap-2">
+              <EyeOff className="w-4 h-4 text-amber-600" />
+              3. Cookie Policy
+            </h4>
+            <p>
+              Strictly necessary authentication tokens are required for application security and multi-tenant isolation. Analytics and functional cookies remain disabled until voluntary user consent is granted above. No third-party ad networks or cross-site tracking technologies are deployed.
+            </p>
+          </div>
+
+          <div className="pt-4">
+            <h4 className="font-bold text-slate-900 text-sm mb-1.5 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-blue-600" />
+              4. Refund &amp; Cancellation Policy
+            </h4>
+            <p>
+              InvoiceReady offers a 14-day unconditional money-back guarantee for enterprise audit tier subscriptions if our automated readiness assessments fail to provide actionable gap findings matching published UAE MoF or Philippines BIR e-invoicing decrees.
+            </p>
+          </div>
+
+          <div className="pt-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <h4 className="font-bold text-slate-900 text-sm mb-1.5 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-slate-700" />
+              5. Statutory Regulatory Disclaimer
+            </h4>
+            <p className="font-medium text-slate-700">
+              InvoiceReady provides an automated technical and syntactic readiness assessment based on identified regulatory rule packs (AE-2026.2 and PH-2026.2). This assessment does NOT constitute official legal or tax advice, formal tax representation before the UAE Federal Tax Authority (FTA) or the Philippines Bureau of Internal Revenue (BIR), or an official government compliance certificate. Official compliance requires deployment through accredited ASP partners or EIS/CAS accreditation.
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
