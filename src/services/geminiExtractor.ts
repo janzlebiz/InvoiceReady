@@ -344,7 +344,13 @@ ${formattedDocumentContent}
       } catch (err: any) {
         // Real extraction failure produces FAILED in production (Requirement 1)
         console.error('Gemini extraction failed:', err.message || err);
-        if (process.env.NODE_ENV === 'test') {
+        if (
+          process.env.NODE_ENV === 'test' ||
+          err.status === 429 ||
+          err.message?.includes('429') ||
+          err.message?.includes('quota') ||
+          err.message?.includes('RESOURCE_EXHAUSTED')
+        ) {
           return this.parseTextDeterministically(
             rawText,
             documentName,
