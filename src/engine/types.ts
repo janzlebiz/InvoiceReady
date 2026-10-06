@@ -461,11 +461,11 @@ export interface ScanSession {
   business_profile: BusinessProfile;
   system_profile: SystemProfile;
   status: ScanStatus;
-  document_name: string;
-  document_size_bytes: number;
-  document_mime_type: string;
-  document_hash: string;
-  storage_path: string;
+  document_name?: string;
+  document_size_bytes?: number;
+  document_mime_type?: string;
+  document_hash?: string;
+  storage_path?: string;
   security_scan_result?: {
     passed: boolean;
     malware_clean: boolean;
@@ -473,14 +473,14 @@ export interface ScanSession {
     findings: string[];
     scanned_at: string;
   };
-  uploaded_at: string;
+  uploaded_at?: string;
   completed_at?: string;
   extraction_result?: ExtractionResult;
-  applicable_rules: string[];
-  validation_results: RuleValidationResult[];
+  applicable_rules?: string[];
+  validation_results?: RuleValidationResult[];
   scorecard?: Scorecard;
-  findings: Finding[];
-  remediation_plan: RemediationAction[];
+  findings?: Finding[];
+  remediation_plan?: RemediationAction[];
   rule_pack_version: string;
   error_message?: string;
 }

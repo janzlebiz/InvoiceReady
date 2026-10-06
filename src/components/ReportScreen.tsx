@@ -99,7 +99,7 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
             </div>
             <div>
               <span className="text-slate-400">Timestamp: </span>
-              <span>{new Date(scan.completed_at || scan.uploaded_at).toLocaleString()}</span>
+              <span>{new Date(scan.completed_at || scan.uploaded_at || Date.now()).toLocaleString()}</span>
             </div>
           </div>
         </div>
@@ -214,14 +214,14 @@ export const ReportScreen: React.FC<ReportScreenProps> = ({
             3. Regulatory Gaps &amp; Remediation Plan
           </h3>
 
-          {scan.remediation_plan.length === 0 ? (
+          {(!scan.remediation_plan || scan.remediation_plan.length === 0) ? (
             <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600" />
               <span>No critical gaps detected. Document and system profiles satisfy all evaluated rules.</span>
             </div>
           ) : (
             <div className="space-y-3">
-              {scan.remediation_plan.map((item, idx) => (
+              {(scan.remediation_plan || []).map((item, idx) => (
                 <div key={item.action_id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-900">

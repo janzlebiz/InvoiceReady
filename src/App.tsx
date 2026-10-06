@@ -29,7 +29,7 @@ import { RuleRegistry } from './rules/ruleRegistry';
 import { ApplicabilityEngine } from './engine/applicabilityEngine';
 import { RuleEngine } from './engine/ruleEngine';
 import { ScoringEngine } from './engine/scoringEngine';
-import { GeminiExtractor } from './services/geminiExtractor';
+import { ClientExtractor } from './services/clientExtractor';
 import { SAMPLE_INVOICES } from './engine/sampleInvoices';
 
 export const App: React.FC = () => {
@@ -109,9 +109,9 @@ export const App: React.FC = () => {
   };
 
   const handleProcessingComplete = async () => {
-    // Run live or sample-backed extraction
+    // Run live server extraction or client-safe parser
     const scanId = `scan_${Date.now().toString(36)}`;
-    const extraction = await GeminiExtractor.extractInvoice(
+    const extraction = await ClientExtractor.extractInvoice(
       uploadedDocument.fileName,
       uploadedDocument.rawText,
       uploadedDocument.mimeType,
@@ -270,8 +270,8 @@ export const App: React.FC = () => {
 
         {currentView === 'findings' && currentScan && (
           <FindingsScreen
-            findings={currentScan.findings}
-            validationResults={currentScan.validation_results}
+            findings={currentScan.findings || []}
+            validationResults={currentScan.validation_results || []}
             onBackToDashboard={() => setCurrentView('dashboard')}
             onGoToRemediation={() => setCurrentView('remediation')}
           />
@@ -279,7 +279,7 @@ export const App: React.FC = () => {
 
         {currentView === 'remediation' && currentScan && (
           <RemediationScreen
-            remediationPlan={currentScan.remediation_plan}
+            remediationPlan={currentScan.remediation_plan || []}
             onBackToDashboard={() => setCurrentView('dashboard')}
             onGoToReport={() => setCurrentView('report')}
           />

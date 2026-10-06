@@ -166,7 +166,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               onClick={onViewFindings}
               className="text-xs font-bold text-slate-900 hover:text-slate-700 flex items-center gap-1"
             >
-              <span>View all findings ({scan.findings.length})</span>
+              <span>View all findings ({scan.findings?.length || 0})</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>

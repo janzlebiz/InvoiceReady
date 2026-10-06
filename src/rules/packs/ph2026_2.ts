@@ -237,6 +237,23 @@ export const PH_RULES_V2: RegulatoryRule[] = [
         };
       }
 
+      // Case 2B: Expired Converted Official Receipt after Transition Window (Requirement 53, 54)
+      if (docType === 'OFFICIAL_RECEIPT' && isConvertedOR && issueDate > '2026-12-31') {
+        return {
+          state: 'FAIL',
+          message:
+            'Expired Converted Official Receipt: The statutory transition period for using converted/stamped Official Receipts expired on December 31, 2026 pursuant to RMC No. 98-2026 and RR 7-2024. Effective January 1, 2027, all sales substantiation requires newly printed Invoices.',
+          evidence_fields: ['metadata.document_type', 'metadata.is_converted_official_receipt', 'invoice_dates.issue_date'],
+          recommended_action:
+            'Issue newly printed Invoices compliant with RR 26-2025. Converted/stamped Official Receipts are strictly invalid after December 31, 2026.',
+          why_it_matters:
+            'Post-transition input tax claims based on converted Official Receipts are disallowed by the BIR pursuant to RMC 98-2026.',
+          implementation_steps: [
+            'Transition billing systems to newly printed Invoices immediately.',
+          ],
+        };
+      }
+
       // Case 3: Unconverted Official Receipt issued after EOPT effective date
       if (docType === 'OFFICIAL_RECEIPT' && !isConvertedOR) {
         return {
