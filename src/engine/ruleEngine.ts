@@ -121,6 +121,8 @@ export class RuleEngine {
             document_number: sourceDoc?.document_number || '',
             locator: rule.source_locator,
             url: sourceDoc?.url || '',
+            source_hash: sourceDoc?.source_hash || 'HASH-UNAVAILABLE',
+            document_version: sourceDoc?.document_version || '1.0',
           },
           pack_version: rule.pack_version,
         };

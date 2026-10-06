@@ -1,118 +1,117 @@
 /**
- * InvoiceReady v1.0 - Document Storage, Retention & Security Inspection Service
- * Conforms to TSD-001, Sections 34, 35, 43, 44.
+ * InvoiceReady v1.0 - Private Storage Service
+ * Conforms to Requirements 8, 10, 13, Sections 34, 35, 44.
+ * Manages private quarantined files, promotion to secure staging upon inspection pass,
+ * and physical deletion of expired documents.
  */
 
-export interface DocumentValidationResult {
-  valid: boolean;
-  sanitizedFileName: string;
-  detectedMime: string;
-  sizeBytes: number;
+import fs from 'fs';
+import path from 'path';
+import { SecurityScanner, SecurityInspectionResult } from './securityScanner';
+
+export interface StoredDocumentMetadata {
+  documentId: string;
+  organizationId: string;
+  scanId: string;
+  fileName: string;
+  storagePath: string;
+  quarantinePath?: string;
+  fileSizeBytes: number;
+  mimeType: string;
   sha256Hash: string;
-  error?: string;
+  isQuarantined: boolean;
+  retentionExpiresAt: string;
+  createdAt: string;
 }
 
 export class StorageService {
-  private static MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB limit
+  private static BASE_STORAGE_DIR = process.env.STORAGE_DIR || '/tmp/invoiceready_storage';
+  private static QUARANTINE_DIR = path.join(process.env.STORAGE_DIR || '/tmp/invoiceready_storage', 'quarantine');
 
-  private static ALLOWED_MIME_TYPES = [
-    'application/pdf',
-    'image/png',
-    'image/jpeg',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // XLSX
-    'text/csv',
-    'application/xml',
-    'text/xml',
-  ];
-
-  public static validateFile(
-    fileName: string,
-    mimeType: string,
-    sizeBytes: number,
-    bufferSnippet?: Uint8Array
-  ): DocumentValidationResult {
-    // 1. Sanitize file name
-    const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-
-    // 2. Size limit
-    if (sizeBytes > this.MAX_FILE_SIZE_BYTES) {
-      return {
-        valid: false,
-        sanitizedFileName,
-        detectedMime: mimeType,
-        sizeBytes,
-        sha256Hash: '',
-        error: `File size exceeds the 15MB maximum allowed limit (${(sizeBytes / (1024 * 1024)).toFixed(1)}MB).`,
-      };
+  public static initializeStorageDirs(): void {
+    if (!fs.existsSync(this.BASE_STORAGE_DIR)) {
+      fs.mkdirSync(this.BASE_STORAGE_DIR, { recursive: true });
     }
-
-    // 3. Extension inspection
-    const ext = sanitizedFileName.split('.').pop()?.toLowerCase();
-    const allowedExts = ['pdf', 'png', 'jpg', 'jpeg', 'xlsx', 'csv', 'xml'];
-    if (!ext || !allowedExts.includes(ext)) {
-      return {
-        valid: false,
-        sanitizedFileName,
-        detectedMime: mimeType,
-        sizeBytes,
-        sha256Hash: '',
-        error: `Unsupported file extension (.${ext}). Supported formats: PDF, PNG, JPG, XLSX, CSV.`,
-      };
+    if (!fs.existsSync(this.QUARANTINE_DIR)) {
+      fs.mkdirSync(this.QUARANTINE_DIR, { recursive: true });
     }
-
-    // 4. Magic bytes inspection
-    let detectedMime = mimeType;
-    if (bufferSnippet && bufferSnippet.length >= 4) {
-      const isPdf =
-        bufferSnippet[0] === 0x25 &&
-        bufferSnippet[1] === 0x50 &&
-        bufferSnippet[2] === 0x44 &&
-        bufferSnippet[3] === 0x46; // %PDF
-      const isPng =
-        bufferSnippet[0] === 0x89 &&
-        bufferSnippet[1] === 0x50 &&
-        bufferSnippet[2] === 0x4e &&
-        bufferSnippet[3] === 0x47; // .PNG
-      const isJpg = bufferSnippet[0] === 0xff && bufferSnippet[1] === 0xd8;
-
-      if (ext === 'pdf' && !isPdf) {
-        return {
-          valid: false,
-          sanitizedFileName,
-          detectedMime: 'corrupted/unknown',
-          sizeBytes,
-          sha256Hash: '',
-          error: 'File header does not match genuine PDF magic bytes (%PDF). File rejected.',
-        };
-      }
-      if (isPdf) detectedMime = 'application/pdf';
-      if (isPng) detectedMime = 'image/png';
-      if (isJpg) detectedMime = 'image/jpeg';
-    }
-
-    // Compute mock sha256 hash for audit tracking
-    const pseudoHash = `sha256:${Math.random().toString(36).substring(2, 15)}${Date.now().toString(36)}`;
-
-    return {
-      valid: true,
-      sanitizedFileName,
-      detectedMime,
-      sizeBytes,
-      sha256Hash: pseudoHash,
-    };
   }
 
-  public static getRetentionPolicy(): {
-    originalDocumentsHours: number;
-    extractedDataDays: number;
-    reportsDays: number;
-    auditLogsDays: number;
-  } {
-    return {
-      originalDocumentsHours: 24, // Section 35
-      extractedDataDays: 30,
-      reportsDays: 30,
-      auditLogsDays: 365,
-    };
+  /**
+   * Saves uploaded bytes into quarantine first (Requirement 10)
+   */
+  public static saveToQuarantine(
+    buffer: Buffer,
+    originalFileName: string,
+    organizationId: string,
+    scanId: string
+  ): { quarantinePath: string; sha256Hash: string } {
+    this.initializeStorageDirs();
+    const sha256Hash = SecurityScanner.calculateSha256(buffer);
+    const quarantineSubdir = path.join(this.QUARANTINE_DIR, organizationId, scanId);
+    if (!fs.existsSync(quarantineSubdir)) {
+      fs.mkdirSync(quarantineSubdir, { recursive: true });
+    }
+
+    const safeName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const quarantinePath = path.join(quarantineSubdir, `${Date.now()}_${safeName}`);
+    fs.writeFileSync(quarantinePath, buffer);
+
+    return { quarantinePath, sha256Hash };
+  }
+
+  /**
+   * Promotes file from quarantine to private secured storage upon security validation pass
+   */
+  public static promoteToPrivateStorage(
+    quarantinePath: string,
+    organizationId: string,
+    scanId: string,
+    fileName: string
+  ): string {
+    const targetDir = path.join(this.BASE_STORAGE_DIR, organizationId, scanId, 'original');
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = path.join(targetDir, safeName);
+
+    fs.copyFileSync(quarantinePath, storagePath);
+    // Remove from quarantine once promoted
+    try {
+      fs.unlinkSync(quarantinePath);
+    } catch (_) {}
+
+    return storagePath;
+  }
+
+  /**
+   * Reads private stored file buffer securely (server-side only)
+   */
+  public static readStoredFile(storagePath: string): Buffer | null {
+    try {
+      if (fs.existsSync(storagePath)) {
+        return fs.readFileSync(storagePath);
+      }
+    } catch (err) {
+      console.error(`Failed to read stored file at ${storagePath}:`, err);
+    }
+    return null;
+  }
+
+  /**
+   * Permanently unlinks stored file (Requirement 13 & Section 35)
+   */
+  public static deletePhysicalFile(storagePath: string): boolean {
+    try {
+      if (fs.existsSync(storagePath)) {
+        fs.unlinkSync(storagePath);
+        return true;
+      }
+    } catch (err) {
+      console.error(`Error deleting file at ${storagePath}:`, err);
+    }
+    return false;
   }
 }

@@ -1,6 +1,6 @@
 /**
  * InvoiceReady v1.0 - Core Canonical Types & Interfaces
- * Authoritative Frozen Baseline Specification
+ * Authoritative Frozen Baseline Specification (Production Remediated)
  */
 
 // ---------------------------------------------------------------------------
@@ -68,10 +68,19 @@ export interface CanonicalInvoice {
   invoice_id: string;
   source_document_id: string;
   metadata: {
-    document_type: 'TAX_INVOICE' | 'SIMPLIFIED_TAX_INVOICE' | 'COMMERCIAL_INVOICE' | 'OFFICIAL_RECEIPT' | 'CREDIT_NOTE' | 'UNKNOWN';
+    document_type:
+      | 'TAX_INVOICE'
+      | 'SIMPLIFIED_TAX_INVOICE'
+      | 'COMMERCIAL_INVOICE'
+      | 'OFFICIAL_RECEIPT'
+      | 'CREDIT_NOTE'
+      | 'UNKNOWN';
     format: 'PDF_SCANNED' | 'PDF_NATIVE' | 'IMAGE' | 'XML_UBL' | 'JSON' | 'SPREADSHEET';
     structured_export_available: boolean;
     page_count: number;
+    // Model Philippine transition states (Requirement 30, RMC 98-2026 / RR 7-2024)
+    is_converted_official_receipt?: boolean; // True if stamped/converted to "Invoice" during transition
+    conversion_stamp_text?: string | null;
   };
   identifiers: {
     invoice_number: string | null;
@@ -136,15 +145,24 @@ export interface ExtractedFieldEvidence {
   user_modified?: boolean;
 }
 
+export interface DocumentPageExtraction {
+  page_number: number;
+  text_length: number;
+  fields_found: number;
+}
+
 export interface ExtractionResult {
   scan_id: string;
   document_id: string;
   raw_text?: string;
+  pages?: DocumentPageExtraction[];
   canonical_invoice: CanonicalInvoice;
   evidence_map: Record<string, ExtractedFieldEvidence>;
   uncertain_fields: string[];
   extraction_duration_ms: number;
   prompt_injection_flagged: boolean;
+  status: 'EXTRACTED' | 'REVIEW_REQUIRED' | 'FAILED';
+  error_message?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,8 +189,12 @@ export interface BusinessProfile {
     | 'ABOVE_100M_PHP'
     | 'ABOVE_3M_PHP' // PH VAT threshold
     | 'MICRO_BELOW_3M_PHP';
+  // Precise boundary comparison (Requirement 25)
+  annual_turnover_amount?: number;
   transaction_types: ('B2B' | 'B2G' | 'B2C' | 'EXPORT')[];
   taxpayer_category?: UAEPhase | PHTaxpayerCategory;
+  // Model Philippine transition states (Requirement 29)
+  ph_transition_status?: 'PRE_EOPT' | 'IN_TRANSITION' | 'POST_TRANSITION';
   branch_count: number;
   created_at: string;
   updated_at: string;
@@ -199,6 +221,7 @@ export interface SystemProfile {
   structured_export_capability: boolean; // Can produce XML/JSON
   electronic_transmission_capability: boolean; // API / ASP / PEPPOL
   asp_partner_selected?: boolean;
+  asp_partner_name?: string;
   cas_permit_active?: boolean; // Philippines BIR CAS
   number_of_invoice_templates: number;
 }
@@ -230,20 +253,41 @@ export type RuleCategory =
 export interface RegulatorySource {
   source_id: string;
   jurisdiction: JurisdictionCode;
-  authority: string; // e.g. "Federal Tax Authority (UAE)", "Bureau of Internal Revenue (BIR)"
+  authority: string; // e.g. "Ministry of Finance (UAE)", "Bureau of Internal Revenue (BIR)"
   document_title: string;
-  document_number: string; // e.g. "Cabinet Decision No. 91/2023", "RR No. 8-2022"
+  document_number: string; // e.g. "Cabinet Decision No. 91/2023", "RR No. 26-2025"
   publication_date: string;
   effective_date: string;
   url: string;
+  // Requirement 33 & 34: Real cryptographic SHA-256 hash, retrieval date, version
   source_hash: string;
+  retrieved_at: string;
+  document_version: string;
+  exact_locator: string;
   status: 'ACTIVE' | 'SUPERSEDED' | 'REPEALED' | 'DRAFT' | 'REFERENCE_ONLY';
+}
+
+export interface RulePackConfiguration {
+  pack_id: string;
+  jurisdiction: JurisdictionCode;
+  version: string;
+  release_date: string;
+  description: string;
+  dimension_weights: Record<RuleCategory, number>;
+  critical_gate_caps: Record<string, number>;
+  mandatory_effective_dates: {
+    phase_1_asp_selection: string;
+    phase_1_live_mandate: string;
+    phase_2_asp_selection?: string;
+    phase_2_live_mandate?: string;
+    eopt_transition_deadline?: string;
+  };
 }
 
 export interface RegulatoryRule {
   rule_id: string;
   jurisdiction: JurisdictionCode;
-  pack_version: string; // e.g. "AE-2026.1", "PH-2026.1"
+  pack_version: string; // e.g. "AE-2026.2", "PH-2026.2"
   title: string;
   description: string;
   category: RuleCategory;
@@ -251,7 +295,7 @@ export interface RegulatoryRule {
   effective_from: string;
   effective_until?: string | null;
   source_id: string;
-  source_locator: string; // e.g. "Article 4, Paragraph 2", "Section 237-A"
+  source_locator: string; // e.g. "Ministerial Decision 145/2024 Art. 3", "RMC 98-2026 Q&A 4"
   is_critical_gate: boolean;
   failure_score_cap?: number; // Caps overall score if this rule fails (e.g. 69)
   points_allocated: number; // Dimension weight contribution
@@ -295,7 +339,7 @@ export interface RuleValidationResult {
 }
 
 // ---------------------------------------------------------------------------
-// 5. READINESS SCORE & FINDINGS (Sections 17-22)
+// 5. READINESS SCORE & FINDINGS (Sections 17-22, Requirement 46-48)
 // ---------------------------------------------------------------------------
 
 export type ScoreClassification =
@@ -303,7 +347,8 @@ export type ScoreClassification =
   | 'MOSTLY_READY' // 75-89
   | 'NEEDS_ATTENTION' // 60-74
   | 'SIGNIFICANT_GAPS' // 40-59
-  | 'NOT_READY'; // 0-39
+  | 'NOT_READY' // 0-39
+  | 'REVIEW_REQUIRED'; // Critical evidence uncertain
 
 export interface DimensionScore {
   dimension: RuleCategory;
@@ -314,12 +359,14 @@ export interface DimensionScore {
   applicable_rules_count: number;
   passed_rules_count: number;
   failed_rules_count: number;
+  review_required_count?: number;
 }
 
 export interface Scorecard {
-  overall_score: number; // 0 to 100
+  overall_score: number | null; // null if definitive score blocked by REVIEW_REQUIRED
   raw_calculated_score: number;
   classification: ScoreClassification;
+  definitive_score_blocked: boolean;
   critical_gate_triggered: boolean;
   critical_gate_cap?: number;
   critical_gate_reason?: string;
@@ -332,6 +379,7 @@ export interface Scorecard {
     failed: number;
     not_applicable: number;
     unknown: number;
+    review_required: number;
   };
   findings_by_severity: {
     critical: number;
@@ -364,6 +412,8 @@ export interface Finding {
     document_number: string;
     locator: string;
     url: string;
+    source_hash: string;
+    document_version: string;
   };
   pack_version: string;
 }
@@ -385,15 +435,17 @@ export interface RemediationAction {
 }
 
 // ---------------------------------------------------------------------------
-// 6. SCAN PIPELINE & LIFECYCLE (Section 30 & 31)
+// 6. SCAN PIPELINE & LIFECYCLE (Section 30, 31, Requirement 10, 12)
 // ---------------------------------------------------------------------------
 
 export type ScanStatus =
   | 'CREATED'
-  | 'UPLOAD_PENDING'
-  | 'UPLOADED'
-  | 'SECURITY_CHECK'
+  | 'QUARANTINED'
+  | 'SECURITY_VALIDATING'
+  | 'SECURITY_PASSED'
+  | 'SECURITY_REJECTED'
   | 'EXTRACTING'
+  | 'REVIEW_REQUIRED'
   | 'NORMALIZING'
   | 'VALIDATING'
   | 'SCORING'
@@ -413,6 +465,14 @@ export interface ScanSession {
   document_size_bytes: number;
   document_mime_type: string;
   document_hash: string;
+  storage_path: string;
+  security_scan_result?: {
+    passed: boolean;
+    malware_clean: boolean;
+    structural_integrity_clean: boolean;
+    findings: string[];
+    scanned_at: string;
+  };
   uploaded_at: string;
   completed_at?: string;
   extraction_result?: ExtractionResult;
@@ -426,11 +486,13 @@ export interface ScanSession {
 }
 
 // ---------------------------------------------------------------------------
-// 7. PRIVACY, CONSENT & AUDIT (Sections 35, 36, 50, 59)
+// 7. PRIVACY, CONSENT & AUDIT (Sections 35, 36, 50, 59, Requirement 14, 15)
 // ---------------------------------------------------------------------------
 
 export interface CookieConsentPreferences {
   consent_id: string;
+  organization_id: string;
+  user_id?: string;
   timestamp: string;
   policy_version: string;
   necessary: boolean; // Always true
@@ -438,6 +500,16 @@ export interface CookieConsentPreferences {
   analytics: boolean;
   marketing: boolean;
   jurisdiction_context: JurisdictionCode;
+}
+
+export interface PrivacyRequest {
+  request_id: string;
+  organization_id: string;
+  requester_email: string;
+  request_type: 'ACCESS' | 'CORRECTION' | 'DELETION' | 'EXPORT';
+  status: 'PENDING' | 'VERIFIED' | 'COMPLETED' | 'REJECTED';
+  received_at: string;
+  completed_at?: string;
 }
 
 export interface AuditLogEntry {
@@ -448,16 +520,38 @@ export interface AuditLogEntry {
     | 'USER_LOGIN'
     | 'SCAN_CREATED'
     | 'DOCUMENT_UPLOADED'
+    | 'SECURITY_SCAN_PASSED'
+    | 'SECURITY_SCAN_FAILED'
     | 'EXTRACTION_COMPLETED'
     | 'EVIDENCE_MODIFIED'
     | 'DOCUMENT_DELETED'
+    | 'DOCUMENT_RETENTION_PURGED'
     | 'RULE_PACK_PUBLISHED'
     | 'REPORT_GENERATED'
     | 'PRIVACY_REQUEST_CREATED'
-    | 'CONSENT_UPDATED';
+    | 'CONSENT_UPDATED'
+    | 'UNAUTHORIZED_ACCESS_ATTEMPT';
   resource_id: string;
   timestamp: string;
   result: 'SUCCESS' | 'FAILURE';
   ip_address: string;
   metadata?: Record<string, any>;
+}
+
+export interface TestCaseResult {
+  testId: string;
+  category: 'SECURITY' | 'TENANT_ISOLATION' | 'REGULATORY' | 'CRITICAL_GATE' | 'AI_EXTRACTION' | 'PRIVACY';
+  name: string;
+  mappedRequirementId: string;
+  status: 'PASS' | 'FAIL';
+  executionTimeMs: number;
+  details: string;
+}
+
+export interface TestSuiteOutcome {
+  results: TestCaseResult[];
+  total: number;
+  passed: number;
+  failed: number;
+  durationMs: number;
 }

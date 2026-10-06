@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TestRunner, TestCaseResult } from '../engine/testRunner';
+import { TestCaseResult, TestSuiteOutcome } from '../engine/types';
 import { CheckCircle2, XCircle, PlayCircle, X, ShieldCheck, RefreshCw } from 'lucide-react';
 
 interface TestSuiteModalProps {
@@ -8,22 +8,31 @@ interface TestSuiteModalProps {
 }
 
 export const TestSuiteModal: React.FC<TestSuiteModalProps> = ({ isOpen, onClose }) => {
-  const [testResults, setTestResults] = useState<{
-    results: TestCaseResult[];
-    total: number;
-    passed: number;
-    failed: number;
-    durationMs: number;
-  } | null>(null);
+  const [testResults, setTestResults] = useState<TestSuiteOutcome | null>(null);
   const [running, setRunning] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const executeTests = () => {
+  const executeTests = async () => {
     setRunning(true);
-    setTimeout(() => {
-      const outcome = TestRunner.runAllTests();
-      setTestResults(outcome);
+    setErrorMsg(null);
+    try {
+      const resp = await fetch('/api/tests/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setTestResults(data);
+      } else {
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson.message || `Test runner service returned HTTP ${resp.status}`);
+      }
+    } catch (err: any) {
+      console.error('Failed to run backend tests:', err);
+      setErrorMsg(err.message || 'Failed to connect to backend test runner service.');
+    } finally {
       setRunning(false);
-    }, 200);
+    }
   };
 
   useEffect(() => {
@@ -58,6 +67,19 @@ export const TestSuiteModal: React.FC<TestSuiteModalProps> = ({ isOpen, onClose 
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* Error Banner */}
+        {errorMsg && (
+          <div className="my-3 p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center justify-between">
+            <span>{errorMsg}</span>
+            <button
+              onClick={executeTests}
+              className="font-semibold underline ml-2 text-rose-800 hover:text-rose-900"
+            >
+              Retry
+            </button>
+          </div>
+        )}
 
         {/* Results Banner */}
         {testResults && (

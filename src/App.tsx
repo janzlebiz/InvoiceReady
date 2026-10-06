@@ -160,6 +160,7 @@ export const App: React.FC = () => {
       document_size_bytes: uploadedDocument.fileSize,
       document_mime_type: uploadedDocument.mimeType,
       document_hash: `sha256:${Date.now().toString(36)}`,
+      storage_path: `/storage/${uploadedDocument.fileName}`,
       uploaded_at: new Date().toISOString(),
       completed_at: new Date().toISOString(),
       extraction_result: currentExtraction || undefined,
