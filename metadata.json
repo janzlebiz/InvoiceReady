@@ -1,0 +1,6 @@
+{
+  "name": "InvoiceReady",
+  "description": "E-invoicing regulatory readiness assessment platform for UAE and the Philippines. Upload invoices, evaluate regulatory applicability, and receive deterministic gap analysis and remediation plans.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
