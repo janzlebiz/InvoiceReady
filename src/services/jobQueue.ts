@@ -17,6 +17,7 @@ import { RuleEngine } from '../engine/ruleEngine';
 import { ScoringEngine } from '../engine/scoringEngine';
 import { RuleRegistry } from '../rules/ruleRegistry';
 import { PdfReportService } from './pdfReportService';
+import { DocumentParser } from './documentParser';
 import { CloudTasksClient } from '@google-cloud/tasks';
 
 export interface DurableJob {
@@ -271,9 +272,15 @@ export class JobQueue {
     scan.status = 'EXTRACTING';
     await DatabaseService.updateScan(scan);
 
-    // Read stored file buffer securely
+    // Read stored file buffer securely and extract text via DocumentParser (RC2.1 Item 4)
     const fileBuffer = scan.storage_path ? await StorageService.readStoredFile(scan.storage_path) : null;
-    const rawText = fileBuffer ? fileBuffer.toString('utf8') : '';
+    const rawText = fileBuffer
+      ? await DocumentParser.extractDocumentText(
+          fileBuffer,
+          scan.document_name || 'invoice.pdf',
+          scan.document_mime_type || 'application/pdf'
+        )
+      : '';
 
     // 1. Extraction (Requirements 35-44)
     const extraction = await GeminiExtractor.extractInvoice(

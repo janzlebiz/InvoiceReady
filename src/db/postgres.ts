@@ -196,6 +196,7 @@ export class DatabaseService {
         locked_at TIMESTAMPTZ,
         locked_by VARCHAR(128),
         lease_expires_at TIMESTAMPTZ,
+        next_retry_at TIMESTAMPTZ,
         payload JSONB,
         result JSONB,
         error_message TEXT,
@@ -298,7 +299,10 @@ export class DatabaseService {
     let role: 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER' = 'ANALYST';
 
     if (userRes.rows.length === 0) {
-      // Requirement 6: Explicitly control automatic organization creation
+      // RC2.1 Item 3: Auto-org creation is 100% disabled in production
+      if (isProd) {
+        throw new Error('Automatic organization creation is disabled in production. Organization onboarding invitation required.');
+      }
       if (options?.allowAutoOrgCreation === false) {
         throw new Error('Automatic organization creation is disabled. User must be explicitly invited to an organization.');
       }
@@ -307,23 +311,26 @@ export class DatabaseService {
       orgId = `org_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
       const memberId = `mem_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
 
-      // Insert new user
-      await client.query(
-        'INSERT INTO users (user_id, firebase_uid, email, full_name, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW())',
-        [userId, firebaseUid, email, fullName]
-      );
-
-      // Insert new organization
-      await client.query(
-        'INSERT INTO organizations (organization_id, name, country_code, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())',
-        [orgId, `${fullName}'s Organization`, 'AE']
-      );
-
-      // Assign OWNER role
-      await client.query(
-        'INSERT INTO organization_users (id, organization_id, user_id, role, joined_at) VALUES ($1, $2, $3, $4, NOW())',
-        [memberId, orgId, userId, 'OWNER']
-      );
+      // Transactional organization + user + membership provisioning (RC2.1 Item 3)
+      await client.exec('BEGIN');
+      try {
+        await client.query(
+          'INSERT INTO users (user_id, firebase_uid, email, full_name, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW())',
+          [userId, firebaseUid, email, fullName]
+        );
+        await client.query(
+          'INSERT INTO organizations (organization_id, name, country_code, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())',
+          [orgId, `${fullName}'s Organization`, 'AE']
+        );
+        await client.query(
+          'INSERT INTO organization_users (id, organization_id, user_id, role, joined_at) VALUES ($1, $2, $3, $4, NOW())',
+          [memberId, orgId, userId, 'OWNER']
+        );
+        await client.exec('COMMIT');
+      } catch (txErr) {
+        await client.exec('ROLLBACK');
+        throw txErr;
+      }
 
       role = 'OWNER';
     } else {
@@ -339,21 +346,28 @@ export class DatabaseService {
         orgId = memRes.rows[0].organization_id;
         role = memRes.rows[0].role as any;
       } else {
-        // Requirement: Existing users without an active membership must receive onboarding-required
-        if (options?.allowAutoOrgCreation === false) {
+        // RC2.1 Item 3: Existing users without active memberships must receive onboarding-required
+        if (isProd || options?.allowAutoOrgCreation === false) {
           throw new Error('User does not belong to an active organization. Organization onboarding required.');
         }
 
         // Fallback provision org only in non-production/permissive test environments
         orgId = `org_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
-        await client.query(
-          'INSERT INTO organizations (organization_id, name, country_code) VALUES ($1, $2, $3)',
-          [orgId, `${fullName}'s Organization`, 'AE']
-        );
-        await client.query(
-          'INSERT INTO organization_users (id, organization_id, user_id, role) VALUES ($1, $2, $3, $4)',
-          [`mem_${Date.now().toString(36)}`, orgId, userId, 'OWNER']
-        );
+        await client.exec('BEGIN');
+        try {
+          await client.query(
+            'INSERT INTO organizations (organization_id, name, country_code) VALUES ($1, $2, $3)',
+            [orgId, `${fullName}'s Organization`, 'AE']
+          );
+          await client.query(
+            'INSERT INTO organization_users (id, organization_id, user_id, role) VALUES ($1, $2, $3, $4)',
+            [`mem_${Date.now().toString(36)}`, orgId, userId, 'OWNER']
+          );
+          await client.exec('COMMIT');
+        } catch (txErr) {
+          await client.exec('ROLLBACK');
+          throw txErr;
+        }
         role = 'OWNER';
       }
     }
@@ -590,9 +604,14 @@ export class DatabaseService {
     await this.initialize();
     await this.client!.query(
       `UPDATE job_queue SET
-        status = $1,
+        status = $1::VARCHAR,
         result = $2,
         error_message = $3,
+        next_retry_at = CASE
+          WHEN $1::VARCHAR = 'FAILED' AND attempt_count < max_attempts
+          THEN NOW() + (POWER(2, LEAST(attempt_count, 6)) * INTERVAL '2 seconds')
+          ELSE NULL
+        END,
         updated_at = NOW()
       WHERE operation_id = $4 AND organization_id = $5`,
       [
@@ -615,7 +634,8 @@ export class DatabaseService {
   }
 
   /**
-   * Atomically claims a job lease in PostgreSQL to prevent concurrent execution between Cloud Tasks and recovery supervisor (Requirement 4).
+   * Atomically claims a job lease in PostgreSQL to prevent concurrent execution between Cloud Tasks and recovery supervisor (RC2.1 Item 1).
+   * Enforces attempt_count < max_attempts and exponential backoff retry window atomically at database level.
    */
   public static async claimJobLease(
     operationId: string,
@@ -635,9 +655,11 @@ export class DatabaseService {
        WHERE operation_id = $3
          AND organization_id = $4
          AND attempt_count < max_attempts
+         AND (next_retry_at IS NULL OR next_retry_at <= NOW())
          AND (
            status = 'QUEUED'
            OR (status = 'PROCESSING' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+           OR (status = 'FAILED' AND attempt_count < max_attempts)
          )
        RETURNING operation_id, status`,
       [workerId, leaseDurationSeconds, operationId, organizationId]
@@ -648,7 +670,15 @@ export class DatabaseService {
   public static async getPendingQueueJobs(): Promise<any[]> {
     await this.initialize();
     const res = await this.client!.query(
-      `SELECT * FROM job_queue WHERE status = 'QUEUED' OR (status = 'PROCESSING' AND (lease_expires_at IS NULL OR lease_expires_at < NOW())) LIMIT 10`
+      `SELECT * FROM job_queue
+       WHERE attempt_count < max_attempts
+         AND (
+           (status = 'QUEUED' AND (next_retry_at IS NULL OR next_retry_at <= NOW()))
+           OR (status = 'PROCESSING' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+           OR (status = 'FAILED' AND next_retry_at IS NOT NULL AND next_retry_at <= NOW())
+         )
+       ORDER BY created_at ASC
+       LIMIT 10`
     );
     return res.rows;
   }
