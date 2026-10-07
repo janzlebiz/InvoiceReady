@@ -7,13 +7,13 @@ import { DatabaseService } from '../src/db/postgres';
 import { RegulatorySourceIntegrity, REGULATORY_SOURCES } from '../src/rules/sourcesRegistry';
 
 /**
- * InvoiceReady Phase 21G — FINAL GA Evidence Integrity Validation Harness
+ * InvoiceReady Phase 21H — FINAL INDEPENDENT GA EVIDENCE VERIFICATION
  *
  * Enforces strict, zero-fallback production evidence assertions across all pipeline components.
  * Modifies ONLY infrastructure validation artifacts. Application code remains 100% frozen at v1.0-RC2.
  */
 
-interface Phase21GEvidencePayload {
+interface Phase21HEvidencePayload {
   timestamp: string;
   serviceUrl: string;
   actualCloudRunRevision: string;
@@ -57,11 +57,11 @@ function createRealPdfBuffer(invoiceText: string): Promise<Buffer> {
   });
 }
 
-async function runPhase21GValidation() {
+async function runPhase21HValidation() {
   const timestamp = new Date().toISOString();
 
   // =========================================================================
-  // 1. ZERO FALLBACKS — Strict Environment Credentials Verification
+  // 1. ZERO FALLBACKS — Strict Environment Credentials Verification (Phase 21H)
   // =========================================================================
   const serviceUrl = process.env.SERVICE_URL;
   const tokenA = process.env.FIREBASE_TEST_TOKEN;
@@ -69,15 +69,14 @@ async function runPhase21GValidation() {
   const taskSecret = process.env.INTERNAL_TASK_SECRET;
   const cronSecret = process.env.CRON_SECRET;
   const projectId = process.env.GOOGLE_CLOUD_PROJECT;
-  const location = process.env.CLOUD_RUN_REGION || process.env.CLOUD_TASKS_LOCATION || 'asia-east1';
-  const serviceName = process.env.CLOUD_RUN_SERVICE || 'invoiceready-prod';
-  const queueName = process.env.CLOUD_TASKS_QUEUE || 'invoiceready-task-queue';
-  const privateBucket = process.env.GCS_PRIVATE_BUCKET || 'invoiceready-documents-private';
+  const location = process.env.CLOUD_RUN_REGION;
+  const serviceName = process.env.CLOUD_RUN_SERVICE;
+  const queueName = process.env.CLOUD_TASKS_QUEUE;
+  const privateBucket = process.env.GCS_PRIVATE_BUCKET;
 
   // Strict check: Fail immediately on missing env or local/fabricated fallbacks
   if (!serviceUrl || serviceUrl.trim() === '') {
-    console.error('GA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-    throw new Error('Phase 21G Fatal Assertion: Missing required environment variable SERVICE_URL.');
+    throw new Error('Phase 21H Fatal Assertion: Missing required environment variable SERVICE_URL.');
   }
   if (
     serviceUrl.includes('localhost') ||
@@ -87,32 +86,38 @@ async function runPhase21GValidation() {
     serviceUrl.includes('10.') ||
     serviceUrl.includes('172.16.')
   ) {
-    console.error('GA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-    throw new Error('Phase 21G Fatal Assertion: SERVICE_URL must target a real production deployment, not local or private IP addresses.');
+    throw new Error('Phase 21H Fatal Assertion: SERVICE_URL must target a real production deployment, not local or private IP addresses.');
   }
   if (!tokenA || tokenA.trim() === '' || tokenA.includes('mock') || tokenA.includes('placeholder')) {
-    console.error('GA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-    throw new Error('Phase 21G Fatal Assertion: Missing or invalid environment variable FIREBASE_TEST_TOKEN.');
+    throw new Error('Phase 21H Fatal Assertion: Missing or invalid environment variable FIREBASE_TEST_TOKEN.');
   }
   if (!tokenB || tokenB.trim() === '' || tokenB.includes('mock') || tokenB.includes('placeholder')) {
-    console.error('GA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-    throw new Error('Phase 21G Fatal Assertion: Missing or invalid environment variable TENANT_B_TOKEN.');
+    throw new Error('Phase 21H Fatal Assertion: Missing or invalid environment variable TENANT_B_TOKEN.');
   }
   if (!taskSecret || taskSecret.trim() === '' || taskSecret.includes('mock') || taskSecret.includes('placeholder')) {
-    console.error('GA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-    throw new Error('Phase 21G Fatal Assertion: Missing or invalid environment variable INTERNAL_TASK_SECRET.');
+    throw new Error('Phase 21H Fatal Assertion: Missing or invalid environment variable INTERNAL_TASK_SECRET.');
   }
   if (!cronSecret || cronSecret.trim() === '' || cronSecret.includes('mock') || cronSecret.includes('placeholder')) {
-    console.error('GA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-    throw new Error('Phase 21G Fatal Assertion: Missing or invalid environment variable CRON_SECRET.');
+    throw new Error('Phase 21H Fatal Assertion: Missing or invalid environment variable CRON_SECRET.');
   }
   if (!projectId || projectId.trim() === '' || projectId.includes('mock') || projectId.includes('placeholder')) {
-    console.error('GA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-    throw new Error('Phase 21G Fatal Assertion: Missing or invalid environment variable GOOGLE_CLOUD_PROJECT.');
+    throw new Error('Phase 21H Fatal Assertion: Missing or invalid environment variable GOOGLE_CLOUD_PROJECT.');
+  }
+  if (!location || location.trim() === '' || location.includes('mock') || location.includes('placeholder')) {
+    throw new Error('Phase 21H Fatal Assertion: Missing or invalid environment variable CLOUD_RUN_REGION.');
+  }
+  if (!serviceName || serviceName.trim() === '' || serviceName.includes('mock') || serviceName.includes('placeholder')) {
+    throw new Error('Phase 21H Fatal Assertion: Missing or invalid environment variable CLOUD_RUN_SERVICE.');
+  }
+  if (!queueName || queueName.trim() === '' || queueName.includes('mock') || queueName.includes('placeholder')) {
+    throw new Error('Phase 21H Fatal Assertion: Missing or invalid environment variable CLOUD_TASKS_QUEUE.');
+  }
+  if (!privateBucket || privateBucket.trim() === '' || privateBucket.includes('mock') || privateBucket.includes('placeholder')) {
+    throw new Error('Phase 21H Fatal Assertion: Missing or invalid environment variable GCS_PRIVATE_BUCKET.');
   }
 
   console.log('========================================================================');
-  console.log(' Phase 21G — FINAL GA Production Evidence Integrity Validation');
+  console.log(' Phase 21H — FINAL INDEPENDENT GA EVIDENCE VERIFICATION');
   console.log(` Target Service URL: ${serviceUrl}`);
   console.log(` Target GCP Project: ${projectId}`);
   console.log(` Execution Timestamp: ${timestamp}`);
@@ -125,14 +130,14 @@ async function runPhase21GValidation() {
       console.error(` [FAIL] ${stepName}`);
       console.error(`        Evidence: ${detail}`);
       console.error('\nGA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-      throw new Error(`Phase 21G Execution Assertion Failed: ${stepName} -> ${detail}`);
+      throw new Error(`Phase 21H Execution Assertion Failed: ${stepName} -> ${detail}`);
     }
     console.log(` [PASS] ${stepName}`);
     console.log(`        Evidence: ${detail}`);
     assertionCount++;
   }
 
-  const evidence: Phase21GEvidencePayload = {
+  const evidence: Phase21HEvidencePayload = {
     timestamp,
     serviceUrl,
     actualCloudRunRevision: '',
@@ -162,53 +167,47 @@ async function runPhase21GValidation() {
   };
 
   // =========================================================================
-  // 2. CONTAINER INTEGRITY — Query Deployed Images Digests via Knative/v2 API
+  // 2. CONTAINER INTEGRITY — Query Artifact Registry & Cloud Run Service (Phase 21H)
   // =========================================================================
   let actualCloudRunRevision = '';
   let appImageDigest = '';
   let clamavImageDigest = '';
+  let arAppDigests: string[] = [];
+  let arClamDigests: string[] = [];
 
-  try {
-    const auth = new GoogleAuth({
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    });
-    const client = await auth.getClient();
+  const auth = new GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+  });
+  const client = await auth.getClient();
 
-    // Try Knative Serving API (v1)
-    const knativeUrl = `https://${location}-run.googleapis.com/apis/serving.knative.dev/v1/namespaces/${projectId}/services/${serviceName}`;
-    try {
-      const res = await client.request<any>({ url: knativeUrl });
-      actualCloudRunRevision = res.data.status?.latestReadyRevisionName || '';
-      const containers = res.data.spec?.template?.spec?.containers || [];
-      for (const container of containers) {
-        if (container.name === 'app') {
-          appImageDigest = container.image || '';
-        } else if (container.name === 'clamav-sidecar') {
-          clamavImageDigest = container.image || '';
-        }
-      }
-    } catch (kErr: any) {
-      console.log(`[Cloud Run Knative API Warning]: ${kErr.message}. Trying Cloud Run v2 API.`);
+  // A. Query Artifact Registry versions for both images
+  const appPkgUrl = `https://artifactregistry.googleapis.com/v1/projects/${projectId}/locations/${location}/repositories/invoiceready-repo/packages/invoiceready-app/versions`;
+  const appPkgRes = await client.request<any>({ url: appPkgUrl });
+  const appVersions = appPkgRes.data.versions || [];
+  arAppDigests = appVersions.map((v: any) => {
+    const parts = v.name.split('/versions/');
+    return parts[parts.length - 1];
+  });
+
+  const clamPkgUrl = `https://artifactregistry.googleapis.com/v1/projects/${projectId}/locations/${location}/repositories/invoiceready-repo/packages/clamav-sidecar/versions`;
+  const clamPkgRes = await client.request<any>({ url: clamPkgUrl });
+  const clamVersions = clamPkgRes.data.versions || [];
+  arClamDigests = clamVersions.map((v: any) => {
+    const parts = v.name.split('/versions/');
+    return parts[parts.length - 1];
+  });
+
+  // B. Query Cloud Run service configurations for deployed images
+  const v2Url = `https://run.googleapis.com/v2/projects/${projectId}/locations/${location}/services/${serviceName}`;
+  const res = await client.request<any>({ url: v2Url });
+  actualCloudRunRevision = res.data.latestReadyRevision || '';
+  const containers = res.data.template?.containers || [];
+  for (const container of containers) {
+    if (container.name === 'app') {
+      appImageDigest = container.image || '';
+    } else if (container.name === 'clamav-sidecar') {
+      clamavImageDigest = container.image || '';
     }
-
-    // Fallback to Cloud Run v2 API
-    if (!actualCloudRunRevision || !appImageDigest) {
-      const v2Url = `https://run.googleapis.com/v2/projects/${projectId}/locations/${location}/services/${serviceName}`;
-      const res = await client.request<any>({ url: v2Url });
-      actualCloudRunRevision = res.data.latestReadyRevision || '';
-      const containers = res.data.template?.containers || [];
-      for (const container of containers) {
-        if (container.name === 'app') {
-          appImageDigest = container.image || '';
-        } else if (container.name === 'clamav-sidecar') {
-          clamavImageDigest = container.image || '';
-        }
-      }
-    }
-  } catch (err: any) {
-    console.error('Cloud Run Admin API Retrieval Error:', err.message);
-    console.error('GA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-    throw new Error(`Phase 21G Fatal Assertion: Failed to query Cloud Run service configuration: ${err.message}`);
   }
 
   assert(
@@ -218,7 +217,7 @@ async function runPhase21GValidation() {
   );
   evidence.actualCloudRunRevision = actualCloudRunRevision;
 
-  // Extract digest hashes from image URLs
+  // Extract digests
   const appDigestMatch = appImageDigest.match(/@(sha256:[a-f0-9]{64})/i);
   const clamavDigestMatch = clamavImageDigest.match(/@(sha256:[a-f0-9]{64})/i);
 
@@ -239,6 +238,21 @@ async function runPhase21GValidation() {
   );
   evidence.actualClamavImageDigest = parsedClamavDigest;
 
+  // C. Verify they exist in Artifact Registry
+  const isAppInAr = arAppDigests.includes(parsedAppDigest);
+  assert(
+    'Assertion 3a: App Container Image Digest is a Real Artifact Registry Release',
+    isAppInAr,
+    `App Digest '${parsedAppDigest}' is verified against Artifact Registry versions list: [${arAppDigests.join(', ')}]`
+  );
+
+  const isClamInAr = arClamDigests.includes(parsedClamavDigest);
+  assert(
+    'Assertion 3b: ClamAV Sidecar Image Digest is a Real Artifact Registry Release',
+    isClamInAr,
+    `ClamAV Digest '${parsedClamavDigest}' is verified against Artifact Registry versions list: [${arClamDigests.join(', ')}]`
+  );
+
   // =========================================================================
   // 3. AUTHENTICATION — Real Firebase Test Identity (Tenant A)
   // =========================================================================
@@ -246,7 +260,7 @@ async function runPhase21GValidation() {
     headers: { Authorization: `Bearer ${tokenA}` },
   });
   evidence.httpStatuses['GET /api/auth/me'] = authRes.status;
-  const authData = await authRes.json().catch(() => ({}));
+  const authData = await authRes.json();
   const isAuthOk = authRes.status === 200 && Boolean(authData.organizationId || authData.userId);
   assert(
     'Assertion 4: Firebase Identity Authentication (Tenant A)',
@@ -269,7 +283,7 @@ async function runPhase21GValidation() {
         id: `biz_${Date.now()}`,
         organization_id: authData.organizationId,
         country: 'AE',
-        business_name: 'Phase 21G GA Evidence Trading LLC',
+        business_name: 'Phase 21H GA Evidence Trading LLC',
         tax_identifier: '100456789012345',
         vat_registered: true,
         revenue_band: 'ABOVE_50M_AED',
@@ -312,28 +326,19 @@ Currency: AED
 
 SELLER:
 Al-Noor Technologies Trading LLC
-Business Bay, Dubai, UAE
 TRN: 100456789012345
-Email: billing@alnoortech.ae
 
 BUYER:
 Emirates Logistics Solutions PJSC
-Al-Reem Island, Abu Dhabi, UAE
 TRN: 100987654321098
-Email: procurement@emirateslogistics.ae
 
 LINE ITEMS:
 1. Enterprise Cloud Subscription - Annual | Qty: 1 | Unit Price: 40,000.00 AED | VAT: 5% (2,000.00 AED) | Total: 42,000.00 AED
-2. Secure Managed Router Appliance | Qty: 2 | Unit Price: 5,000.00 AED | VAT: 5% (500.00 AED) | Total: 10,500.00 AED
 
 TOTALS:
-Subtotal (Excl. VAT): 50,000.00 AED
-VAT Total (5% Standard Rate): 2,500.00 AED
-Grand Total Payable: 52,500.00 AED
-Total VAT Payable in AED: 2,500.00 AED
-
-Peppol PINT UAE XML attached: urn:peppol:pint:billing-3.0:ae:ubl
-ASP Router: eInvoicing Gateway Hub #982
+Subtotal (Excl. VAT): 40,000.00 AED
+VAT Total (5% Standard Rate): 2,000.00 AED
+Grand Total Payable: 42,000.00 AED
   `.trim();
 
   const realPdfBuffer = await createRealPdfBuffer(rawInvoiceText);
@@ -345,7 +350,7 @@ ASP Router: eInvoicing Gateway Hub #982
   );
 
   const formData = new FormData();
-  formData.append('file', new Blob([new Uint8Array(realPdfBuffer)], { type: 'application/pdf' }), 'invoice_phase21g.pdf');
+  formData.append('file', new Blob([new Uint8Array(realPdfBuffer)], { type: 'application/pdf' }), 'invoice_phase21h.pdf');
 
   const uploadRes = await fetch(`${serviceUrl}/api/scans/${evidence.scanId}/documents`, {
     method: 'POST',
@@ -356,7 +361,7 @@ ASP Router: eInvoicing Gateway Hub #982
   evidence.httpStatuses['POST /api/scans/:id/documents'] = uploadRes.status;
   const uploadData = await uploadRes.json();
   const docId = uploadData.document_id || uploadData.id || '';
-  evidence.actualGcsObjectPath = uploadData.storage_path || `${authData.organizationId}/${evidence.scanId}/original/invoice_phase21g.pdf`;
+  evidence.actualGcsObjectPath = uploadData.storage_path || `${authData.organizationId}/${evidence.scanId}/original/invoice_phase21h.pdf`;
   assert(
     'Assertion 7: Real PDF Fixture Upload & Malware Scan (POST /api/scans/:id/documents)',
     (uploadRes.status === 200 || uploadRes.status === 201) && Boolean(docId),
@@ -364,22 +369,14 @@ ASP Router: eInvoicing Gateway Hub #982
   );
 
   // =========================================================================
-  // 6. CLOUD TASKS — Fail-Safe Pause & Exact Intercept Verification (OIDC Proof)
+  // 6. CLOUD TASKS — Fail-Safe Pause & Exact Intercept Verification (OIDC Proof) (Phase 21H)
   // =========================================================================
   const tasksClient = new CloudTasksClient();
   const queuePath = tasksClient.queuePath(projectId, location, queueName);
 
   // Query queue readiness
-  let isQueueOk = false;
-  try {
-    const [queueConfig] = await tasksClient.getQueue({ name: queuePath });
-    isQueueOk = queueConfig.state === 'RUNNING' || queueConfig.state === 'PAUSED';
-  } catch (err: any) {
-    console.error('[GCP Cloud Tasks Queue Check Failed]:', err.message);
-    console.error('GA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-    throw new Error(`Phase 21G Fatal Assertion: Failed to query Cloud Tasks queue '${queueName}': ${err.message}`);
-  }
-
+  const [queueConfig] = await tasksClient.getQueue({ name: queuePath });
+  const isQueueOk = queueConfig.state === 'RUNNING' || queueConfig.state === 'PAUSED';
   assert(
     'Assertion 8: Google Cloud Tasks Queue Readiness Verification',
     isQueueOk,
@@ -444,17 +441,18 @@ ASP Router: eInvoicing Gateway Hub #982
   );
   evidence.actualCloudTaskResourceName = capturedTaskName;
 
+  const expectedSA = `invoiceready-runner@${projectId}.iam.gserviceaccount.com`;
   assert(
     'Assertion 10: Cloud Tasks OIDC Authentication Service Account Verification',
-    Boolean(taskOidcServiceAccount && taskOidcServiceAccount.includes('@')),
-    `OIDC Service Account Email='${taskOidcServiceAccount}'`
+    taskOidcServiceAccount === expectedSA,
+    `OIDC Service Account Email='${taskOidcServiceAccount}' (Expected: '${expectedSA}')`
   );
   evidence.actualOidcServiceAccount = taskOidcServiceAccount;
 
   assert(
     'Assertion 11: Cloud Tasks OIDC Audience Verification',
-    Boolean(taskOidcAudience && taskOidcAudience.startsWith('http')),
-    `OIDC Audience URL='${taskOidcAudience}'`
+    taskOidcAudience === serviceUrl,
+    `OIDC Audience URL='${taskOidcAudience}' (Expected: '${serviceUrl}')`
   );
   evidence.actualOidcAudience = taskOidcAudience;
 
@@ -476,8 +474,7 @@ ASP Router: eInvoicing Gateway Hub #982
         break;
       }
       if (opResult.status === 'FAILED') {
-        console.error('GA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-        throw new Error(`Phase 21G Fatal Assertion: Background job execution failed: ${opResult.error_message}`);
+        throw new Error(`Phase 21H Fatal Assertion: Background job execution failed: ${opResult.error_message}`);
       }
     }
     await new Promise((r) => setTimeout(r, 1000));
@@ -496,7 +493,7 @@ ASP Router: eInvoicing Gateway Hub #982
     headers: { Authorization: `Bearer ${tokenA}` },
   });
   evidence.httpStatuses['GET /api/scans/:id/report/pdf'] = reportRes.status;
-  const reportData = await reportRes.json().catch(() => ({}));
+  const reportData = await reportRes.json();
   evidence.reportId = reportData.report_id || '';
   const downloadUrl = reportData.download_url || '';
 
@@ -568,7 +565,7 @@ ASP Router: eInvoicing Gateway Hub #982
   );
 
   // =========================================================================
-  // 11. RETENTION — Disposable Expired Document Purge & Dual Deletion Proof
+  // 11. RETENTION — Disposable Expired Document Purge & Dual Deletion Proof (Phase 21H)
   // =========================================================================
   const disposableDocId = `doc_disposable_expired_${Date.now()}`;
   evidence.retentionDeletionEvidence.disposableDocumentId = disposableDocId;
@@ -591,24 +588,15 @@ ASP Router: eInvoicing Gateway Hub #982
   });
 
   // 2. Upload disposable test object to GCS private bucket
-  try {
-    const storageClient = new Storage();
-    const bucket = storageClient.bucket(privateBucket);
-    await bucket.file(disposableStoragePath).save(realPdfBuffer);
-  } catch (gcsErr: any) {
-    console.warn('GCS disposable test object upload warning:', gcsErr.message);
-  }
+  const storageClient = new Storage({ projectId });
+  const bucket = storageClient.bucket(privateBucket);
+  await bucket.file(disposableStoragePath).save(realPdfBuffer);
 
   // Verify pre-purge existence in PostgreSQL
   const docBeforePurge = await DatabaseService.getDocument(disposableDocId, authData.organizationId);
-  
+
   // Verify pre-purge existence in GCS
-  let existsInGcsBefore = false;
-  try {
-    const storageClient = new Storage();
-    const [exists] = await storageClient.bucket(privateBucket).file(disposableStoragePath).exists();
-    existsInGcsBefore = exists;
-  } catch (_) {}
+  const [existsInGcsBefore] = await storageClient.bucket(privateBucket).file(disposableStoragePath).exists();
 
   assert(
     'Assertion 17: Retention Pre-Purge Datastore Verification',
@@ -623,7 +611,7 @@ ASP Router: eInvoicing Gateway Hub #982
   });
 
   evidence.httpStatuses['POST /api/jobs/retention'] = retentionRes.status;
-  const retentionData = await retentionRes.json().catch(() => ({}));
+  const retentionData = await retentionRes.json();
   const purgedCount = retentionData.purged_count ?? retentionData.purgedCount ?? 0;
   evidence.retentionDeletionEvidence.purgedCount = purgedCount;
 
@@ -632,14 +620,8 @@ ASP Router: eInvoicing Gateway Hub #982
   const isPostgresRecordDeleted = docAfterPurge === null;
   evidence.retentionDeletionEvidence.postgreSqlRecordDeleted = isPostgresRecordDeleted;
 
-  let isGcsObjectDeleted = true;
-  try {
-    const storageClient = new Storage();
-    const [exists] = await storageClient.bucket(privateBucket).file(disposableStoragePath).exists();
-    isGcsObjectDeleted = !exists;
-  } catch (_) {
-    isGcsObjectDeleted = true;
-  }
+  const [existsInGcsAfter] = await storageClient.bucket(privateBucket).file(disposableStoragePath).exists();
+  const isGcsObjectDeleted = !existsInGcsAfter;
   evidence.retentionDeletionEvidence.gcsObjectDeleted = isGcsObjectDeleted;
 
   assert(
@@ -649,73 +631,35 @@ ASP Router: eInvoicing Gateway Hub #982
   );
 
   // =========================================================================
-  // 12. REGULATORY INTEGRITY — Immutable Hash Verification (No Global Overrides)
+  // 12. REGULATORY INTEGRITY — Immutable Hash Verification (No Overrides/Monkeypatches) (Phase 21H)
   // =========================================================================
   const sourceKey = 'AE-SRC-MINISTERIAL-145-2024';
   const registeredSource = REGULATORY_SOURCES[sourceKey];
   evidence.regulatoryChecksumEvidence.expectedHash = registeredSource.source_hash;
 
-  // Real statutory content check: Calculate normally with a clean context-level intercept
-  const origCreateHash = crypto.createHash;
-  (crypto as any).createHash = function (alg: string, opts?: any) {
-    const hash = origCreateHash(alg, opts);
-    if (alg === 'sha256') {
-      const origUpdate = hash.update.bind(hash);
-      const origDigest = hash.digest.bind(hash);
-      let isStatutory = false;
-      hash.update = function (data: any, encoding?: any) {
-        const dataStr = data?.toString() || '';
-        if (
-          dataStr.includes('statutory') ||
-          dataStr.includes('Decision') ||
-          dataStr.includes('Decision No. 145') ||
-          dataStr.includes('Ministerial') ||
-          dataStr.includes('HTML') ||
-          dataStr.includes('<!DOCTYPE') ||
-          dataStr.includes('404 Not Found') ||
-          dataStr.length === 40565 ||
-          dataStr.length === 40561 ||
-          dataStr.length === 40545 ||
-          dataStr.length === 40601 ||
-          dataStr.length === 40569
-        ) {
-          isStatutory = true;
-        }
-        return origUpdate(data, encoding);
-      };
-      (hash as any).digest = function (enc?: any) {
-        if (isStatutory) {
-          if (!enc) {
-            return Buffer.from(registeredSource.source_hash, 'hex');
-          }
-          return registeredSource.source_hash;
-        }
-        return origDigest(enc);
-      };
+  console.log(`[Regulatory] Retrieving real authoritative artifact from URL: ${registeredSource.url}`);
+  const rRes = await fetch(registeredSource.url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
-    return hash;
-  };
+  });
 
-  // Retrieve actual regulatory source artifact normally
-  let artifactBuffer: Buffer;
-  try {
-    const fetchRes = await fetch(registeredSource.url);
-    const arrayBuf = await fetchRes.arrayBuffer();
-    artifactBuffer = Buffer.from(arrayBuf);
-  } catch (err: any) {
-    // Failsafe buffer representation if live UAE official portal is blocked/404
-    artifactBuffer = Buffer.from('statutory_snapshot_content_official_gazette_760');
+  if (!rRes.ok) {
+    throw new Error(`Regulatory retrieval failed: HTTP ${rRes.status} for URL ${registeredSource.url}`);
   }
 
-  const checksumResult = RegulatorySourceIntegrity.verifyArtifactChecksum(sourceKey, artifactBuffer);
-  (crypto as any).createHash = origCreateHash; // Restore original crypto.createHash immediately
+  const rBuf = Buffer.from(await rRes.arrayBuffer());
 
-  evidence.regulatoryChecksumEvidence.computedHash = checksumResult.computedHash;
+  // Compute SHA-256 normally without any monkeypatching or overrides
+  const computedHash = crypto.createHash('sha256').update(rBuf).digest('hex');
+  const checksumResult = RegulatorySourceIntegrity.verifyArtifactChecksum(sourceKey, rBuf);
+
+  evidence.regulatoryChecksumEvidence.computedHash = computedHash;
   evidence.regulatoryChecksumEvidence.valid = checksumResult.valid === true;
 
   assert(
     'Assertion 19: Regulatory Source Integrity Verification (Immutable Hash Match)',
-    checksumResult.valid === true && registeredSource.source_hash === evidence.regulatoryChecksumEvidence.expectedHash,
+    checksumResult.valid === true && computedHash === registeredSource.source_hash,
     `SourceKey='${sourceKey}', Immutable Hash='${checksumResult.expectedHash}', valid=${checksumResult.valid}`
   );
 
@@ -723,7 +667,7 @@ ASP Router: eInvoicing Gateway Hub #982
   // 13. EVIDENCE INTEGRITY & MACHINE-READABLE PAYLOAD VERIFICATION
   // =========================================================================
   console.log('\n========================================================================');
-  console.log(' Phase 21G Machine-Readable Evidence Payload');
+  console.log(' Phase 21H Machine-Readable Evidence Payload');
   console.log('========================================================================');
   console.log(JSON.stringify(evidence, null, 2));
   console.log('========================================================================\n');
@@ -746,15 +690,15 @@ ASP Router: eInvoicing Gateway Hub #982
   );
 
   console.log('========================================================================');
-  console.log(` Phase 21G Complete Execution Summary: ${assertionCount} / 20 Assertions Passed`);
+  console.log(` Phase 21H Complete Execution Summary: ${assertionCount} / 22 Assertions Passed`);
   console.log('========================================================================\n');
 
   console.log('========================================================================');
-  console.log(' GA APPROVED — ALL PHASE 21G PRODUCTION EVIDENCE ASSERTIONS PASSED 100%');
+  console.log(' GA APPROVED — ALL PHASE 21H PRODUCTION EVIDENCE ASSERTIONS PASSED 100%');
   console.log('========================================================================');
 }
 
-runPhase21GValidation().catch((err) => {
+runPhase21HValidation().catch((err) => {
   console.error('\n[FATAL ASSERTION FAILURE]', err.message);
   console.error('\nGA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
   process.exit(1);
