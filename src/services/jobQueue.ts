@@ -269,7 +269,13 @@ export class JobQueue {
     operationId: string,
     scanId: string,
     organizationId: string,
-    userFullName: string
+    userFullName: string,
+    workerAuthMetadata?: {
+      authenticated_via: string;
+      service_account: string;
+      audience: string;
+      verified_at: string;
+    }
   ): Promise<any> {
     const workerId = `worker_${process.pid}_${Math.random().toString(36).substring(2, 7)}`;
     const claimed = await DatabaseService.claimJobLease(operationId, organizationId, workerId, 180);
@@ -378,6 +384,9 @@ export class JobQueue {
       findings_count: scan.findings.length,
       report_url: reportUrl,
       completed_at: scan.completed_at,
+      worker_oidc_authenticated: workerAuthMetadata ? workerAuthMetadata.authenticated_via === 'GOOGLE_OIDC' : false,
+      worker_service_account: workerAuthMetadata?.service_account || '',
+      worker_audience: workerAuthMetadata?.audience || '',
     };
 
     await DatabaseService.updateJobStatus(operationId, organizationId, 'COMPLETED', processResult);

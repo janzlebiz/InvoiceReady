@@ -251,18 +251,20 @@ export class TokenVerifier {
   }
 
   /**
-   * Verifies Google Cloud Scheduler / Cloud Tasks OIDC ID Token (GA Blocker Item 3)
+   * Verifies Google Cloud Scheduler / Cloud Tasks OIDC ID Token and extracts authenticated claims.
    * Validates issuer, audience, expiration, and exact expected service-account identity.
    * Does NOT accept general user ID tokens.
    */
-  public static async verifyCloudSchedulerOidc(token: string): Promise<boolean> {
-    if (!token) return false;
+  public static async verifyOidcToken(
+    token: string
+  ): Promise<{ valid: boolean; email: string; audience: string } | null> {
+    if (!token) return null;
 
     const expectedAudience = process.env.SCHEDULER_AUDIENCE || process.env.CLOUD_TASKS_AUDIENCE;
     const expectedServiceAccount = process.env.SCHEDULER_SERVICE_ACCOUNT || process.env.CLOUD_TASKS_SERVICE_ACCOUNT;
 
     if (process.env.NODE_ENV === 'production' && (!expectedAudience || !expectedServiceAccount)) {
-      return false; // Fail closed if required configuration is missing in production
+      return null; // Fail closed if required configuration is missing in production
     }
 
     // 1. In test/development mode, verify test tokens signed with JWT test secret
@@ -278,19 +280,24 @@ export class TokenVerifier {
             email.includes('cloudscheduler') ||
             email.includes('scheduler');
 
-          if (!isSchedulerIdentity) return false;
+          if (!isSchedulerIdentity) return null;
 
           if (expectedServiceAccount && email && email !== expectedServiceAccount) {
-            return false;
+            return null;
           }
 
           if (expectedAudience && decoded.aud && decoded.aud !== expectedAudience) {
-            return false;
+            return null;
           }
 
-          return true;
+          return {
+            valid: true,
+            email: email || expectedServiceAccount || 'invoiceready-runner@serviceaccount',
+            audience: decoded.aud || expectedAudience || '',
+          };
         }
       } catch (_) {}
+      return null;
     }
 
     // 2. Production Google OIDC verification using Google Auth Library
@@ -301,23 +308,23 @@ export class TokenVerifier {
       });
 
       const payload = ticket.getPayload();
-      if (!payload) return false;
+      if (!payload) return null;
 
       // Validate issuer
       if (payload.iss !== 'https://accounts.google.com' && payload.iss !== 'accounts.google.com') {
-        return false;
+        return null;
       }
 
       // Validate expiration
       const now = Math.floor(Date.now() / 1000);
       if (payload.exp && payload.exp < now) {
-        return false;
+        return null;
       }
 
       // Validate exact expected service-account identity
       const email = payload.email || '';
       if (expectedServiceAccount && email !== expectedServiceAccount) {
-        return false;
+        return null;
       }
 
       const isServiceAccount =
@@ -326,13 +333,25 @@ export class TokenVerifier {
         email.includes('scheduler');
 
       if (!isServiceAccount) {
-        return false; // Reject general user tokens
+        return null; // Reject general user tokens
       }
 
-      return true;
+      return {
+        valid: true,
+        email,
+        audience: typeof payload.aud === 'string' ? payload.aud : (payload.aud ? payload.aud[0] : ''),
+      };
     } catch (err: any) {
-      return false;
+      return null;
     }
+  }
+
+  /**
+   * Verifies Google Cloud Scheduler / Cloud Tasks OIDC ID Token (GA Blocker Item 3)
+   */
+  public static async verifyCloudSchedulerOidc(token: string): Promise<boolean> {
+    const claims = await this.verifyOidcToken(token);
+    return claims !== null && claims.valid === true;
   }
 
   /**

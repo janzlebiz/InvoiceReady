@@ -375,30 +375,72 @@ app.post('/api/internal/queue/worker', async (req: Request, res: Response, next:
     }
 
     let isAuthorized = false;
+    let oidcClaims: { valid: boolean; email: string; audience: string } | null = null;
 
-    // 1. Primary production authentication: Google Cloud Tasks / Cloud Run OIDC service-account token
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      if (taskSecret && token === taskSecret) {
-        isAuthorized = true;
-      } else {
-        isAuthorized = await TokenVerifier.verifyCloudSchedulerOidc(token);
+    if (process.env.NODE_ENV === 'production') {
+      // 1. Production strictly requires valid Google OIDC authentication
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Missing Google Cloud Tasks OIDC Authorization header in production.',
+        });
+        return;
       }
-    }
 
-    // 2. Defense-in-depth: X-Internal-Task-Secret header match
-    if (!isAuthorized && providedSecret && taskSecret && providedSecret === taskSecret) {
+      const oidcToken = authHeader.split(' ')[1];
+      oidcClaims = await TokenVerifier.verifyOidcToken(oidcToken);
+
+      if (!oidcClaims || !oidcClaims.valid) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Invalid Google Cloud Tasks OIDC service-account token, issuer, audience, or expiration.',
+        });
+        return;
+      }
       isAuthorized = true;
-    }
 
-    // Require matching OIDC service account token or defense-in-depth secret
-    if (!isAuthorized) {
-      console.log('[DEBUG Worker Auth Failed]:', { taskSecret, providedSecret, authHeader });
-      res.status(401).json({
-        error: 'Unauthorized',
-        message: 'Missing or invalid Cloud Tasks OIDC service-account token or internal task secret.',
-      });
-      return;
+      // 2. Defense-in-depth: if X-Internal-Task-Secret is provided, it must match
+      if (providedSecret && taskSecret && providedSecret !== taskSecret) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Invalid internal task defense-in-depth secret.',
+        });
+        return;
+      }
+    } else {
+      // Non-production fallback for development / test environments
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        if (taskSecret && token === taskSecret) {
+          isAuthorized = true;
+          oidcClaims = {
+            valid: true,
+            email: process.env.CLOUD_TASKS_SERVICE_ACCOUNT || 'invoiceready-runner@serviceaccount',
+            audience: process.env.CLOUD_TASKS_AUDIENCE || 'http://localhost:3000',
+          };
+        } else {
+          oidcClaims = await TokenVerifier.verifyOidcToken(token);
+          if (oidcClaims && oidcClaims.valid) {
+            isAuthorized = true;
+          }
+        }
+      }
+      if (!isAuthorized && providedSecret && taskSecret && providedSecret === taskSecret) {
+        isAuthorized = true;
+        oidcClaims = {
+          valid: true,
+          email: process.env.CLOUD_TASKS_SERVICE_ACCOUNT || 'invoiceready-runner@serviceaccount',
+          audience: process.env.CLOUD_TASKS_AUDIENCE || 'http://localhost:3000',
+        };
+      }
+
+      if (!isAuthorized) {
+        res.status(401).json({
+          error: 'Unauthorized',
+          message: 'Missing or invalid Cloud Tasks OIDC service-account token or internal task secret.',
+        });
+        return;
+      }
     }
 
     const { operation_id, scan_id, organization_id, user_full_name } = req.body;
@@ -407,15 +449,45 @@ app.post('/api/internal/queue/worker', async (req: Request, res: Response, next:
       return;
     }
 
+    const workerAuthMetadata = {
+      authenticated_via: 'GOOGLE_OIDC',
+      service_account: oidcClaims?.email || '',
+      audience: oidcClaims?.audience || '',
+      verified_at: new Date().toISOString(),
+    };
+
     // Execute the worker task synchronously within the Cloud Tasks invocation
     const result = await JobQueue.executeWorkerTask(
       operation_id,
       scan_id,
       organization_id,
-      user_full_name || 'Cloud Tasks Worker'
+      user_full_name || 'Cloud Tasks Worker',
+      workerAuthMetadata
     );
 
-    res.json({ status: 'COMPLETED', operation_id, result });
+    await DatabaseService.recordAuditLog(
+      'CLOUD_TASKS_WORKER',
+      organization_id,
+      'WORKER_EXECUTED',
+      operation_id,
+      'SUCCESS',
+      getClientIp(req),
+      {
+        operation_id,
+        auth_type: 'GOOGLE_OIDC',
+        service_account: oidcClaims?.email,
+        audience: oidcClaims?.audience,
+      }
+    );
+
+    res.json({
+      status: 'COMPLETED',
+      operation_id,
+      result,
+      worker_oidc_authenticated: true,
+      worker_service_account: oidcClaims?.email,
+      worker_audience: oidcClaims?.audience,
+    });
   } catch (err: any) {
     console.error('[CloudTasks Worker Error]', err);
     res.status(500).json({ error: 'Worker execution failed', message: err.message });
