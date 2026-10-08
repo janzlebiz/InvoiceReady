@@ -86,7 +86,7 @@ export const REGULATORY_SOURCES: Record<string, RegulatorySource> = {
     document_number: 'Ministerial Decision No. 145/2024',
     publication_date: '2024-07-18',
     effective_date: '2024-08-01',
-    url: 'https://mof.gov.ae/en/legislation/ministerial-decisions/ministerial-decision-no-145-of-2024',
+    url: 'https://mof.gov.ae/en/legislation/ministerial-decisions/ministerial-decision-no-145-of-2024.pdf',
     source_hash: '2e1b49c689a5622776a470639bfc4d7389f42c41b4ca997aa221d44d78e1935b',
     retrieved_at: '2026-10-02T10:15:00Z',
     document_version: '2.0 (Official Reconciled Release)',

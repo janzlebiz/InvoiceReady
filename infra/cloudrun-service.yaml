@@ -19,7 +19,7 @@ spec:
       containers:
       # Main Application Container
       - name: app
-        image: asia-east1-docker.pkg.dev/gen-lang-client-0427039673/invoiceready-repo/invoiceready-app@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        image: asia-east1-docker.pkg.dev/gen-lang-client-0427039673/invoiceready-repo/invoiceready-app@sha256:4a8b79e1025d57c2317e1329c0bca8085a864192787766b44ecb72e5058728b9
         ports:
         - name: http1
           containerPort: 3000
@@ -92,7 +92,7 @@ spec:
           periodSeconds: 15
       # ClamAV Antivirus Daemon Sidecar Container
       - name: clamav-sidecar
-        image: asia-east1-docker.pkg.dev/gen-lang-client-0427039673/invoiceready-repo/clamav-sidecar@sha256:d41d8cd98f00b204e9800998ecf8427e00000000000000000000000000000000
+        image: asia-east1-docker.pkg.dev/gen-lang-client-0427039673/invoiceready-repo/clamav-sidecar@sha256:69b4c06b29738096d27ec29a0224d08b3e8b0b8dbb8e21a22129e924765668dc
         ports:
         - name: clamav
           containerPort: 3310

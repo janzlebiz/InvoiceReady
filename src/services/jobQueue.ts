@@ -211,7 +211,10 @@ export class JobQueue {
     };
 
     const [response] = await this.tasksClient.createTask({ parent, task });
-    return { taskName: response.name || `tasks/${operationId}`, queue };
+    if (!response.name) {
+      throw new Error(`Google Cloud Tasks creation failed: response.name is missing for operation ${operationId}`);
+    }
+    return { taskName: response.name, queue };
   }
 
   /**
