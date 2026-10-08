@@ -156,32 +156,52 @@ export class JobQueue {
   ): Promise<{ taskName: string; queue: string }> {
     const queue = process.env.CLOUD_TASKS_QUEUE;
     const project = process.env.GOOGLE_CLOUD_PROJECT;
-    const location = process.env.CLOUD_TASKS_LOCATION || 'asia-east1';
     const appUrl = process.env.APP_URL;
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    // In production, require CLOUD_TASKS_LOCATION with zero fallback/default
+    const location = isProduction
+      ? process.env.CLOUD_TASKS_LOCATION
+      : (process.env.CLOUD_TASKS_LOCATION || 'asia-east1');
 
     if (!queue || !project || !appUrl) {
       throw new Error('Cloud Tasks configuration missing (CLOUD_TASKS_QUEUE, GOOGLE_CLOUD_PROJECT, or APP_URL).');
+    }
+
+    if (isProduction && (!location || location.trim() === '')) {
+      throw new Error('FATAL: CLOUD_TASKS_LOCATION must be explicitly configured in production (no defaults allowed).');
     }
 
     if (!this.tasksClient) {
       this.tasksClient = new CloudTasksClient();
     }
 
-    const parent = this.tasksClient.queuePath(project, location, queue);
+    const parent = this.tasksClient.queuePath(project, location!, queue);
     const workerUrl = `${appUrl}/api/internal/queue/worker`;
     const taskSecret = process.env.INTERNAL_TASK_SECRET;
 
     if (!taskSecret) {
-      if (process.env.NODE_ENV === 'production') {
+      if (isProduction) {
         throw new Error('FATAL: INTERNAL_TASK_SECRET must be configured in production for Cloud Tasks dispatch.');
       }
     }
 
-    const serviceAccountEmail = process.env.CLOUD_TASKS_SERVICE_ACCOUNT || process.env.SCHEDULER_SERVICE_ACCOUNT;
-    const audience = process.env.CLOUD_TASKS_AUDIENCE || process.env.SCHEDULER_AUDIENCE || workerUrl;
+    // In production, require CLOUD_TASKS_SERVICE_ACCOUNT and CLOUD_TASKS_AUDIENCE with zero fallbacks
+    const serviceAccountEmail = isProduction
+      ? process.env.CLOUD_TASKS_SERVICE_ACCOUNT
+      : (process.env.CLOUD_TASKS_SERVICE_ACCOUNT || process.env.SCHEDULER_SERVICE_ACCOUNT);
 
-    if (process.env.NODE_ENV === 'production' && (!serviceAccountEmail || !audience)) {
-      throw new Error('FATAL: Production mode requires CLOUD_TASKS_SERVICE_ACCOUNT and CLOUD_TASKS_AUDIENCE to be configured.');
+    const audience = isProduction
+      ? process.env.CLOUD_TASKS_AUDIENCE
+      : (process.env.CLOUD_TASKS_AUDIENCE || process.env.SCHEDULER_AUDIENCE || workerUrl);
+
+    if (isProduction) {
+      if (!serviceAccountEmail || serviceAccountEmail.trim() === '') {
+        throw new Error('FATAL: CLOUD_TASKS_SERVICE_ACCOUNT must be explicitly configured in production (no fallbacks allowed).');
+      }
+      if (!audience || audience.trim() === '') {
+        throw new Error('FATAL: CLOUD_TASKS_AUDIENCE must be explicitly configured in production (no fallbacks allowed).');
+      }
     }
 
     const payload = {

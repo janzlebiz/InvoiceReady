@@ -46,6 +46,8 @@ spec:
           value: "gen-lang-client-0427039673:asia-east1:invoiceready-postgres"
         - name: CLOUD_TASKS_QUEUE
           value: "invoiceready-task-queue"
+        - name: CLOUD_TASKS_LOCATION
+          value: "asia-east1"
         - name: SCHEDULER_SERVICE_ACCOUNT
           value: "invoiceready-runner@gen-lang-client-0427039673.iam.gserviceaccount.com"
         - name: SCHEDULER_AUDIENCE
