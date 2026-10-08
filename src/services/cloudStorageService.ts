@@ -20,6 +20,19 @@ export interface StoredFileDescriptor {
   sizeBytes: number;
 }
 
+function formatGcsError(err: any): string {
+  if (err?.errors?.[0]?.message) return err.errors[0].message;
+  if (typeof err?.message === 'string') {
+    if (err.message.includes('The specified bucket does not exist')) return 'Specified bucket does not exist';
+    try {
+      const parsed = JSON.parse(err.message);
+      if (parsed?.error?.message) return parsed.error.message;
+    } catch (_) {}
+    return err.message.slice(0, 120);
+  }
+  return 'GCS request failed';
+}
+
 export class CloudStorageService {
   private static storage: Storage | null = null;
   public static QUARANTINE_BUCKET = process.env.GCS_QUARANTINE_BUCKET || 'invoiceready-quarantine';
@@ -99,9 +112,9 @@ export class CloudStorageService {
         return { quarantinePath: objectKey, sha256Hash };
       } catch (err: any) {
         if (process.env.NODE_ENV === 'production') {
-          throw new Error(`FATAL: Production GCS quarantine upload failed: ${err.message}`);
+          throw new Error(`FATAL: Production GCS quarantine upload failed: ${formatGcsError(err)}`);
         }
-        console.warn('GCS quarantine upload fallback to local storage:', err.message);
+        console.warn('GCS quarantine upload fallback to local storage:', formatGcsError(err));
       }
     }
 
@@ -140,9 +153,9 @@ export class CloudStorageService {
         return targetKey;
       } catch (err: any) {
         if (process.env.NODE_ENV === 'production') {
-          throw new Error(`FATAL: Production GCS promotion failed: ${err.message}`);
+          throw new Error(`FATAL: Production GCS promotion failed: ${formatGcsError(err)}`);
         }
-        console.warn('GCS promotion fallback to local storage:', err.message);
+        console.warn('GCS promotion fallback to local storage:', formatGcsError(err));
       }
     }
 
@@ -173,9 +186,9 @@ export class CloudStorageService {
         return contents;
       } catch (err: any) {
         if (process.env.NODE_ENV === 'production') {
-          throw new Error(`FATAL: Production GCS download failed: ${err.message}`);
+          throw new Error(`FATAL: Production GCS download failed: ${formatGcsError(err)}`);
         }
-        console.warn('GCS download fallback to local storage:', err.message);
+        console.warn('GCS download fallback to local storage:', formatGcsError(err));
       }
     }
 
@@ -204,7 +217,7 @@ export class CloudStorageService {
         deleted = true;
       } catch (err: any) {
         if (process.env.NODE_ENV === 'production') {
-          throw new Error(`FATAL: Production GCS file deletion failed: ${err.message}`);
+          throw new Error(`FATAL: Production GCS file deletion failed: ${formatGcsError(err)}`);
         }
       }
     }
@@ -236,9 +249,9 @@ export class CloudStorageService {
         return signedUrl;
       } catch (err: any) {
         if (process.env.NODE_ENV === 'production') {
-          throw new Error(`FATAL: Production GCS signed URL generation failed: ${err.message}`);
+          throw new Error(`FATAL: Production GCS signed URL generation failed: ${formatGcsError(err)}`);
         }
-        console.warn('Could not generate GCS signed URL:', err.message);
+        console.warn('Could not generate GCS signed URL:', formatGcsError(err));
       }
     }
 

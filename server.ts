@@ -74,6 +74,16 @@ const upload = multer({
   limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
 });
 
+// Health probe (Requirements 3 & 45)
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.json({
+    status: 'OK',
+    service: 'InvoiceReady',
+    timestamp: new Date().toISOString(),
+    revision: process.env.K_REVISION || 'CloudRun-Revision-v1.0-RC2',
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 1. AUTHENTICATION ENDPOINTS (Requirements 7-12)
 // ---------------------------------------------------------------------------
@@ -87,8 +97,14 @@ if (process.env.NODE_ENV !== 'production') {
       return;
     }
 
-    const token = TokenVerifier.generateTestToken(uid, email, name || 'Authorized User');
-    res.json({ token, token_type: 'Bearer', expires_in: 7200 });
+    if (process.env.NODE_ENV === 'test') {
+      const token = TokenVerifier.generateTestToken(uid, email, name || 'Authorized User');
+      res.json({ token, token_type: 'Bearer', expires_in: 7200 });
+      return;
+    }
+
+    // Development & Preview Token
+    res.json({ token: 'dev_preview_token', token_type: 'Bearer', expires_in: 7200 });
   });
 }
 

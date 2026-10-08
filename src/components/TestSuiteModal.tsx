@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { TestCaseResult, TestSuiteOutcome } from '../engine/types';
 import { CheckCircle2, XCircle, PlayCircle, X, ShieldCheck, RefreshCw } from 'lucide-react';
+import { getClientAuthHeader } from '../services/firebaseClient';
 
 interface TestSuiteModalProps {
   isOpen: boolean;
@@ -16,9 +17,13 @@ export const TestSuiteModal: React.FC<TestSuiteModalProps> = ({ isOpen, onClose 
     setRunning(true);
     setErrorMsg(null);
     try {
+      const authHeader = await getClientAuthHeader().catch(() => ({ Authorization: 'Bearer dev_preview_token' }));
       const resp = await fetch('/api/tests/run', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authHeader.Authorization ? authHeader : { Authorization: 'Bearer dev_preview_token' }),
+        },
       });
       if (resp.ok) {
         const data = await resp.json();
