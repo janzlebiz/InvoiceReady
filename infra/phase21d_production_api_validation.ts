@@ -59,11 +59,11 @@ function createRealPdfBuffer(invoiceText: string): Promise<Buffer> {
   });
 }
 
-async function runPhase21MValidation() {
+async function runPhase21NValidation() {
   const timestamp = new Date().toISOString();
 
   // =========================================================================
-  // 1. ZERO FALLBACKS — Strict Environment Credentials Verification (Phase 21M)
+  // 1. ZERO FALLBACKS — Strict Environment Credentials Verification (Phase 21N)
   // =========================================================================
   const serviceUrl = process.env.SERVICE_URL;
   const tokenA = process.env.FIREBASE_TEST_TOKEN;
@@ -81,7 +81,7 @@ async function runPhase21MValidation() {
 
   // Strict check: Fail immediately on missing env or local/fabricated fallbacks
   if (!serviceUrl || serviceUrl.trim() === '') {
-    throw new Error('Phase 21M Fatal Assertion: Missing required environment variable SERVICE_URL.');
+    throw new Error('Phase 21N Fatal Assertion: Missing required environment variable SERVICE_URL.');
   }
   if (
     serviceUrl.includes('localhost') ||
@@ -91,47 +91,47 @@ async function runPhase21MValidation() {
     serviceUrl.includes('10.') ||
     serviceUrl.includes('172.16.')
   ) {
-    throw new Error('Phase 21M Fatal Assertion: SERVICE_URL must target a real production deployment, not local or private IP addresses.');
+    throw new Error('Phase 21N Fatal Assertion: SERVICE_URL must target a real production deployment, not local or private IP addresses.');
   }
   if (!tokenA || tokenA.trim() === '' || tokenA.includes('mock') || tokenA.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable FIREBASE_TEST_TOKEN.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable FIREBASE_TEST_TOKEN.');
   }
   if (!tokenB || tokenB.trim() === '' || tokenB.includes('mock') || tokenB.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable TENANT_B_TOKEN.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable TENANT_B_TOKEN.');
   }
   if (!taskSecret || taskSecret.trim() === '' || taskSecret.includes('mock') || taskSecret.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable INTERNAL_TASK_SECRET.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable INTERNAL_TASK_SECRET.');
   }
   if (!cronSecret || cronSecret.trim() === '' || cronSecret.includes('mock') || cronSecret.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable CRON_SECRET.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable CRON_SECRET.');
   }
   if (!projectId || projectId.trim() === '' || projectId.includes('mock') || projectId.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable GOOGLE_CLOUD_PROJECT.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable GOOGLE_CLOUD_PROJECT.');
   }
   if (!location || location.trim() === '' || location.includes('mock') || location.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable CLOUD_RUN_REGION.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable CLOUD_RUN_REGION.');
   }
   if (!serviceName || serviceName.trim() === '' || serviceName.includes('mock') || serviceName.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable CLOUD_RUN_SERVICE.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable CLOUD_RUN_SERVICE.');
   }
   if (!queueName || queueName.trim() === '' || queueName.includes('mock') || queueName.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable CLOUD_TASKS_QUEUE.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable CLOUD_TASKS_QUEUE.');
   }
   if (!tasksLocation || tasksLocation.trim() === '' || tasksLocation.includes('mock') || tasksLocation.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable CLOUD_TASKS_LOCATION.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable CLOUD_TASKS_LOCATION.');
   }
   if (!tasksServiceAccount || tasksServiceAccount.trim() === '' || tasksServiceAccount.includes('mock') || tasksServiceAccount.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable CLOUD_TASKS_SERVICE_ACCOUNT.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable CLOUD_TASKS_SERVICE_ACCOUNT.');
   }
   if (!tasksAudience || tasksAudience.trim() === '' || tasksAudience.includes('mock') || tasksAudience.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable CLOUD_TASKS_AUDIENCE.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable CLOUD_TASKS_AUDIENCE.');
   }
   if (!privateBucket || privateBucket.trim() === '' || privateBucket.includes('mock') || privateBucket.includes('placeholder')) {
-    throw new Error('Phase 21M Fatal Assertion: Missing or invalid environment variable GCS_PRIVATE_BUCKET.');
+    throw new Error('Phase 21N Fatal Assertion: Missing or invalid environment variable GCS_PRIVATE_BUCKET.');
   }
 
   console.log('========================================================================');
-  console.log(' Phase 21M — FINAL GA EVIDENCE HARDENING VALIDATION');
+  console.log(' Phase 21N — FINAL GA EVIDENCE HARDENING VALIDATION');
   console.log(` Target Service URL: ${serviceUrl}`);
   console.log(` Target GCP Project: ${projectId}`);
   console.log(` Execution Timestamp: ${timestamp}`);
@@ -145,7 +145,7 @@ async function runPhase21MValidation() {
       console.error(` [FAIL] ${stepName}`);
       console.error(`        Evidence: ${detail}`);
       console.error('\nGA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-      throw new Error(`Phase 21M Execution Assertion Failed: ${stepName} -> ${detail}`);
+      throw new Error(`Phase 21N Execution Assertion Failed: ${stepName} -> ${detail}`);
     }
     console.log(` [PASS] ${stepName}`);
     console.log(`        Evidence: ${detail}`);
@@ -688,7 +688,7 @@ Grand Total Payable: 42,000.00 AED
   );
 
   // =========================================================================
-  // 12. REGULATORY INTEGRITY — Approved Direct UAE MoF Artifact Binding (Phase 21K)
+  // 12. REGULATORY INTEGRITY — Approved Direct UAE MoF Artifact Binding (Phase 21N)
   // =========================================================================
   const sourceKey = 'AE-SRC-MINISTERIAL-145-2024';
   const registeredSource = REGULATORY_SOURCES[sourceKey];
@@ -699,7 +699,7 @@ Grand Total Payable: 42,000.00 AED
   const downloadableArtifactUrl = registeredSource.url;
 
   if (process.env.STATUTORY_ARTIFACT_URL && process.env.STATUTORY_ARTIFACT_URL !== registeredSource.url) {
-    throw new Error(`Phase 21K Fatal Assertion: Arbitrary STATUTORY_ARTIFACT_URL ('${process.env.STATUTORY_ARTIFACT_URL}') rejected. Must bind strictly to immutable registry URL ('${registeredSource.url}').`);
+    throw new Error(`Phase 21N Fatal Assertion: Arbitrary STATUTORY_ARTIFACT_URL ('${process.env.STATUTORY_ARTIFACT_URL}') rejected. Must bind strictly to immutable registry URL ('${registeredSource.url}').`);
   }
 
   console.log(`[Regulatory] Retrieving official downloadable statutory PDF directly from immutable registry binding: ${downloadableArtifactUrl}`);
@@ -712,22 +712,28 @@ Grand Total Payable: 42,000.00 AED
   });
 
   if (!rRes.ok) {
-    throw new Error(`Phase 21L Fatal Assertion: Regulatory artifact retrieval failed with HTTP ${rRes.status} for URL ${downloadableArtifactUrl}`);
+    throw new Error(`Phase 21N Fatal Assertion: Regulatory artifact retrieval failed with HTTP ${rRes.status} for URL ${downloadableArtifactUrl}`);
   }
 
   const rBuf = Buffer.from(await rRes.arrayBuffer());
 
-  // 2. Require valid PDF content (%PDF- header check)
+  // 2. Strict PDF parsing — Require valid binary PDF (%PDF- header check)
   const isBinaryPdf = rBuf.subarray(0, 5).toString('ascii').startsWith('%PDF-');
   if (!isBinaryPdf) {
-    throw new Error('Phase 21L Fatal Assertion: Downloaded statutory artifact is not a valid PDF (%PDF- header missing).');
+    throw new Error('Phase 21N Fatal Assertion: Downloaded statutory artifact is not a valid PDF (%PDF- header missing).');
   }
 
-  // Extract/read the PDF text using DocumentParser
-  const pdfText = await DocumentParser.extractDocumentText(rBuf, 'statutory_145_2024.pdf', 'application/pdf');
+  // Parse strictly via DocumentParser.parsePdfStrict (Zero UTF-8 fallback, fail closed on error)
+  let pdfText: string;
+  try {
+    pdfText = await DocumentParser.parsePdfStrict(rBuf);
+  } catch (err: any) {
+    throw new Error(`Phase 21N Fatal Assertion: Regulatory artifact PDF parsing failed: ${err.message}`);
+  }
 
+  // Require successful PDF text extraction before metadata extraction
   if (!pdfText || pdfText.trim().length === 0) {
-    throw new Error('Phase 21M Fatal Assertion: Extracted PDF text is empty.');
+    throw new Error('Phase 21N Fatal Assertion: Extracted PDF text is empty.');
   }
 
   // Extract the actual document title, document number, and version from labeled PDF fields
@@ -749,7 +755,7 @@ Grand Total Payable: 42,000.00 AED
   // Fail closed: missing or unparseable metadata = FAIL
   if (!extractedTitle || !extractedDocNumber || !extractedVersion) {
     throw new Error(
-      `Phase 21M Fatal Assertion: Failed to extract labeled metadata from PDF text. Extracted: Title='${extractedTitle}', DocNumber='${extractedDocNumber}', Version='${extractedVersion}'`
+      `Phase 21N Fatal Assertion: Failed to extract labeled metadata from PDF text. Extracted: Title='${extractedTitle}', DocNumber='${extractedDocNumber}', Version='${extractedVersion}'`
     );
   }
 
@@ -789,7 +795,7 @@ Grand Total Payable: 42,000.00 AED
   // 13. EVIDENCE INTEGRITY & MACHINE-READABLE PAYLOAD VERIFICATION
   // =========================================================================
   console.log('\n========================================================================');
-  console.log(' Phase 21M Machine-Readable Evidence Payload');
+  console.log(' Phase 21N Machine-Readable Evidence Payload');
   console.log('========================================================================');
   console.log(JSON.stringify(evidence, null, 2));
   console.log('========================================================================\n');
@@ -815,19 +821,19 @@ Grand Total Payable: 42,000.00 AED
   if (assertionCount !== EXPECTED_ASSERTIONS) {
     console.error(`\n[FATAL ASSERTION COUNT MISMATCH] Expected ${EXPECTED_ASSERTIONS} assertions, got ${assertionCount}`);
     console.error('\nGA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
-    throw new Error(`Phase 21M Assertion Count Mismatch: Expected exactly ${EXPECTED_ASSERTIONS}, executed ${assertionCount}`);
+    throw new Error(`Phase 21N Assertion Count Mismatch: Expected exactly ${EXPECTED_ASSERTIONS}, executed ${assertionCount}`);
   }
 
   console.log('========================================================================');
-  console.log(` Phase 21M Complete Execution Summary: ${assertionCount} / ${EXPECTED_ASSERTIONS} Assertions Passed`);
+  console.log(` Phase 21N Complete Execution Summary: ${assertionCount} / ${EXPECTED_ASSERTIONS} Assertions Passed`);
   console.log('========================================================================\n');
 
   console.log('========================================================================');
-  console.log(' GA APPROVED — ALL PHASE 21M PRODUCTION EVIDENCE ASSERTIONS PASSED 100%');
+  console.log(' GA APPROVED — ALL PHASE 21N PRODUCTION EVIDENCE ASSERTIONS PASSED 100%');
   console.log('========================================================================');
 }
 
-runPhase21MValidation().catch((err) => {
+runPhase21NValidation().catch((err) => {
   console.error('\n[FATAL ASSERTION FAILURE]', err.message);
   console.error('\nGA BLOCKED — PRODUCTION EVIDENCE VALIDATION FAILED');
   process.exit(1);

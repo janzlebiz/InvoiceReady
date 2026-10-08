@@ -47,4 +47,31 @@ export class DocumentParser {
     // Fallback for XML / CSV / Text formats or non-standard text streams
     return buffer.toString('utf8');
   }
+
+  /**
+   * Strict PDF text extraction for authoritative regulatory artifacts (Phase 21N).
+   * - Strict binary PDF validation (%PDF- header)
+   * - Strict PDFParse execution
+   * - Zero fallback to Buffer.toString('utf8')
+   * - Fails closed: throws if parsing fails or if text is empty
+   */
+  public static async parsePdfStrict(buffer: Buffer): Promise<string> {
+    if (!buffer || buffer.length === 0) {
+      throw new Error('Strict PDF parsing failed: buffer is empty.');
+    }
+
+    if (!buffer.subarray(0, 5).toString('ascii').startsWith('%PDF-')) {
+      throw new Error('Strict PDF parsing failed: missing %PDF- header.');
+    }
+
+    const pdfParser = new PDFParse(new Uint8Array(buffer));
+    const result = await pdfParser.getText();
+    const text = typeof result === 'string' ? result : (result?.text || '').trim();
+
+    if (!text || text.length === 0) {
+      throw new Error('Strict PDF parsing failed: extracted text stream is empty.');
+    }
+
+    return text;
+  }
 }
