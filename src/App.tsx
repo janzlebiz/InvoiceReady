@@ -23,15 +23,18 @@ import {
   ScanSession,
   ExtractionResult,
 } from './engine/types';
-import { getClientAuthHeader } from './services/firebaseClient';
+import { getClientAuthHeader } from './services/supabaseClient';
+import { useAuth } from './context/AuthContext';
 
 export const App: React.FC = () => {
+  const { profile } = useAuth();
   const [currentView, setCurrentView] = useState<string>('landing');
   const [testSuiteOpen, setTestSuiteOpen] = useState<boolean>(false);
   const [traceabilityOpen, setTraceabilityOpen] = useState<boolean>(false);
 
-  // User & Administrative context (Requirement 13: Hide Test Suite from normal users)
-  const [userRole, setUserRole] = useState<'VIEWER' | 'ANALYST' | 'ADMIN' | 'OWNER'>('ANALYST');
+  // User & Administrative context derived from Supabase Auth profile
+  const [fallbackRole, setFallbackRole] = useState<'VIEWER' | 'ANALYST' | 'ADMIN' | 'OWNER'>('ANALYST');
+  const userRole = profile?.role || fallbackRole;
   const isAdminOrOwner = userRole === 'ADMIN' || userRole === 'OWNER';
 
   // Assessment flow states (Requirement 2: Zero default sample/demo business data)

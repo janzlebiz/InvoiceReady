@@ -921,24 +921,24 @@ export class TestRunner {
 
       let dbFailClosed = false;
       try {
-        process.env.NODE_ENV = 'production';
+        (process.env as any).NODE_ENV = 'production';
         process.env.DATABASE_URL = 'postgresql://invoiceready_user:PASSWORD@/invoiceready?host=/cloudsql/PROJECT:REGION:INSTANCE';
         await DatabaseService.initialize(true);
       } catch (err: any) {
         dbFailClosed = err.message.includes('FATAL: Production mode requires authoritative Cloud SQL');
       } finally {
-        process.env.NODE_ENV = prevNodeEnv;
+        (process.env as any).NODE_ENV = prevNodeEnv;
         process.env.DATABASE_URL = prevDbUrl;
       }
 
       let storageFailClosed = false;
       try {
-        process.env.NODE_ENV = 'production';
+        (process.env as any).NODE_ENV = 'production';
         await CloudStorageService.verifyProductionBuckets();
       } catch (err: any) {
         storageFailClosed = err.message.includes('FATAL');
       } finally {
-        process.env.NODE_ENV = prevNodeEnv;
+        (process.env as any).NODE_ENV = prevNodeEnv;
       }
 
       const pass = dbFailClosed && storageFailClosed;
@@ -1026,13 +1026,13 @@ export class TestRunner {
 
       let failClosedCaught = false;
       try {
-        process.env.NODE_ENV = 'production';
+        (process.env as any).NODE_ENV = 'production';
         delete process.env.INTERNAL_TASK_SECRET;
         await JobQueue.dispatchCloudTask('op_test', 'scan_test', 'org_test', 'Auditor');
       } catch (err: any) {
         failClosedCaught = err.message.includes('FATAL: INTERNAL_TASK_SECRET must be configured');
       } finally {
-        process.env.NODE_ENV = prevEnv;
+        (process.env as any).NODE_ENV = prevEnv;
         if (prevTaskSecret) process.env.INTERNAL_TASK_SECRET = prevTaskSecret;
       }
 
@@ -1080,7 +1080,7 @@ export class TestRunner {
       let pass = false;
 
       try {
-        process.env.NODE_ENV = 'production';
+        (process.env as any).NODE_ENV = 'production';
         delete process.env.ALLOW_AUTO_ORG_CREATION;
 
         const newUid = `usr_uninvited_${Date.now()}`;
@@ -1092,7 +1092,7 @@ export class TestRunner {
       } catch (err: any) {
         pass = err.message.includes('Automatic organization creation is disabled');
       } finally {
-        process.env.NODE_ENV = prevEnv;
+        (process.env as any).NODE_ENV = prevEnv;
       }
 
       results.push({
@@ -1259,7 +1259,7 @@ export class TestRunner {
     // SEC-AUTH-TOKEN-ENDPOINT-DISABLED-001: Test Auth Token Endpoint Production Disabling
     {
       const t0 = performance.now();
-      const isProduction = process.env.NODE_ENV === 'production';
+      const isProduction = (process.env as any).NODE_ENV === 'production';
       const allowTestAuth = process.env.ALLOW_TEST_AUTH === 'true';
 
       const pass = Boolean(!isProduction || allowTestAuth);
@@ -1318,7 +1318,7 @@ export class TestRunner {
 
       let pass = false;
       try {
-        process.env.NODE_ENV = 'production';
+        (process.env as any).NODE_ENV = 'production';
         process.env.SCHEDULER_SERVICE_ACCOUNT = 'invoiceready-cron@gen-lang-client-0427039673.iam.gserviceaccount.com';
         process.env.SCHEDULER_AUDIENCE = 'https://invoiceready.internal/api/jobs/retention';
 
@@ -1326,7 +1326,7 @@ export class TestRunner {
         const mismatchCheck = await TokenVerifier.verifyCloudSchedulerOidc('forged_or_user_token');
         pass = mismatchCheck === false;
       } finally {
-        process.env.NODE_ENV = prevEnv;
+        (process.env as any).NODE_ENV = prevEnv;
         if (prevSa) process.env.SCHEDULER_SERVICE_ACCOUNT = prevSa;
         if (prevAud) process.env.SCHEDULER_AUDIENCE = prevAud;
       }
@@ -1351,13 +1351,13 @@ export class TestRunner {
       let blockedInProd = false;
 
       try {
-        process.env.NODE_ENV = 'production';
+        (process.env as any).NODE_ENV = 'production';
         const brandNewUid = `usr_prod_new_${Date.now()}`;
         await DatabaseService.resolveUserAndTenant(brandNewUid, `${brandNewUid}@corp.internal`, 'Prod User');
       } catch (err: any) {
         blockedInProd = err.message.includes('Automatic organization creation is disabled in production');
       } finally {
-        process.env.NODE_ENV = prevEnv;
+        (process.env as any).NODE_ENV = prevEnv;
       }
 
       results.push({
@@ -1435,13 +1435,13 @@ export class TestRunner {
       let failedClosed = false;
 
       try {
-        process.env.NODE_ENV = 'production';
+        (process.env as any).NODE_ENV = 'production';
         // Force signed URL generation failure with invalid path in production mode
         await CloudStorageService.generateSignedUrl('nonexistent/path/invoice.pdf', 15);
       } catch (err: any) {
         failedClosed = err.message.includes('FATAL: Production GCS signed URL generation failed') || err.message.includes('FATAL: Production mode requires authentic Google Cloud Storage signed URLs');
       } finally {
-        process.env.NODE_ENV = prevEnv;
+        (process.env as any).NODE_ENV = prevEnv;
       }
 
       results.push({
@@ -1490,7 +1490,7 @@ export class TestRunner {
 
       let pass = false;
       try {
-        process.env.NODE_ENV = 'production';
+        (process.env as any).NODE_ENV = 'production';
         delete process.env.SCHEDULER_SERVICE_ACCOUNT;
         delete process.env.SCHEDULER_AUDIENCE;
 
@@ -1498,7 +1498,7 @@ export class TestRunner {
         const aud = process.env.SCHEDULER_AUDIENCE;
         pass = !sa && !aud; // Required configuration check verified
       } finally {
-        process.env.NODE_ENV = prevEnv;
+        (process.env as any).NODE_ENV = prevEnv;
         if (prevSa) process.env.SCHEDULER_SERVICE_ACCOUNT = prevSa;
         if (prevAud) process.env.SCHEDULER_AUDIENCE = prevAud;
       }
@@ -1646,14 +1646,14 @@ export class TestRunner {
 
       let failClosed = false;
       try {
-        process.env.NODE_ENV = 'production';
+        (process.env as any).NODE_ENV = 'production';
         delete process.env.SCHEDULER_SERVICE_ACCOUNT;
         delete process.env.SCHEDULER_AUDIENCE;
 
         const check = await TokenVerifier.verifyCloudSchedulerOidc('any_token');
         failClosed = check === false;
       } finally {
-        process.env.NODE_ENV = prevEnv;
+        (process.env as any).NODE_ENV = prevEnv;
         if (prevSa) process.env.SCHEDULER_SERVICE_ACCOUNT = prevSa;
         if (prevAud) process.env.SCHEDULER_AUDIENCE = prevAud;
       }
@@ -1679,12 +1679,12 @@ export class TestRunner {
 
       let failClosed = false;
       try {
-        process.env.NODE_ENV = 'production';
+        (process.env as any).NODE_ENV = 'production';
         delete process.env.INTERNAL_TASK_SECRET;
         const taskSecret = process.env.INTERNAL_TASK_SECRET;
         failClosed = !taskSecret;
       } finally {
-        process.env.NODE_ENV = prevEnv;
+        (process.env as any).NODE_ENV = prevEnv;
         if (prevSecret) process.env.INTERNAL_TASK_SECRET = prevSecret;
       }
 

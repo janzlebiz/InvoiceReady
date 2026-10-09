@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { TestCaseResult, TestSuiteOutcome } from '../engine/types';
 import { CheckCircle2, XCircle, PlayCircle, X, ShieldCheck, RefreshCw } from 'lucide-react';
-import { getClientAuthHeader } from '../services/firebaseClient';
+import { getClientAuthHeader } from '../services/supabaseClient';
 
 interface TestSuiteModalProps {
   isOpen: boolean;

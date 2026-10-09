@@ -64,7 +64,7 @@ export class PdfReportService {
     };
   }
 
-  private static renderPdfDocument(scan: ScanSession, userFullName: string): Promise<Buffer> {
+  public static renderPdfDocument(scan: ScanSession, userFullName: string): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({ margin: 40, size: 'A4' });
       const chunks: Buffer[] = [];

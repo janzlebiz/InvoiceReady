@@ -4,11 +4,9 @@
   "version": "1.0.0-rc.2",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
-    "start": "tsx server.ts",
-    "build": "vite build",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "dev": "node dev-server.mjs",
+    "build": "NODE_ENV=production next build",
+    "start": "next start -p 3000",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -16,6 +14,9 @@
     "@google-cloud/storage": "^8.2.0",
     "@google-cloud/tasks": "^7.2.1",
     "@google/genai": "^2.4.0",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.117.3",
+    "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
     "dotenv": "^17.2.3",
@@ -27,9 +28,11 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "multer": "^2.4.0",
+    "next": "^16.4.0",
     "pdf-parse": "^2.4.5",
     "pdfkit": "^0.20.2",
     "pg": "^8.23.1",
+    "postcss": "^8.5.29",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "vite": "^8.3.0"

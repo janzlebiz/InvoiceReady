@@ -49,7 +49,7 @@ export class DocumentParser {
   }
 
   /**
-   * Strict PDF text extraction for authoritative regulatory artifacts (Phase 21N).
+   * Strict PDF text extraction for authoritative regulatory artifacts (Phase 21P).
    * - Strict binary PDF validation (%PDF- header)
    * - Strict PDFParse execution
    * - Zero fallback to Buffer.toString('utf8')
