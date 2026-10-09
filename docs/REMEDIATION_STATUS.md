@@ -17,15 +17,25 @@
 
 ---
 
+## Phase 1 Implementation & Verification Record
+
+- **SEC-001 (Authentication):** **IMPLEMENTED / BLOCKED (Live)** — Server-side token verification implemented in `src/auth/serverAuth.ts` and integrated across all protected Next.js API routes (`/api/scans`, `/api/scans/[scanId]`, `/api/scans/[scanId]/documents`, `/api/scans/[scanId]/process`, `/api/scans/[scanId]/report/pdf`). Live execution evidence against a real Supabase Auth project remains `BLOCKED`.
+- **SEC-002 (Tenant Isolation):** **IMPLEMENTED / BLOCKED (Live)** — Strict organization ID enforcement and cross-tenant checks implemented across all API handlers. Live multi-tenant RLS acceptance verification remains `BLOCKED`.
+- **SEC-003 (RBAC & Permissions):** **IMPLEMENTED / BLOCKED (Live)** — Server-side role derivation (`VIEWER`, `ANALYST`, `ADMIN`, `OWNER`) enforced on mutation routes. Live privilege escalation testing remains `BLOCKED`.
+- **SEC-004 (PostgreSQL RLS):** **NOT STARTED / BLOCKED (Live)** — Ordered Supabase migrations pending approved test project execution.
+- **SEC-005 (Supabase Storage):** **IMPLEMENTED / BLOCKED (Live)** — Storage service paths bound to server-controlled tenant scope (`organization_id/scan_id/...`) and private buckets. Live bucket policy verification remains `BLOCKED`.
+
+---
+
 ## Remediation Ledger & Test Matrix
 
 | Finding / Req ID | Severity | Category | Affected Component / Files | Status | Evidence / Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **SEC-001** | P0 | Authentication | `app/api/**`, `src/server/auth.ts`, `src/services/supabaseClient.ts` | **BLOCKED** | Requires live Supabase Auth project configuration and real token verification. |
-| **SEC-002** | P0 | Tenant Isolation | `src/server/auth.ts`, scan/document services, API routes | **BLOCKED** | Requires real PostgREST RLS testing with distinct users and organizations. |
-| **SEC-003** | P0 | RBAC & Permissions | Auth boundary, mutation routes, profile schema | **BLOCKED** | Server-side role derivation requires DB-backed profiles and organization membership checks. |
+| **SEC-001** | P0 | Authentication | `src/auth/serverAuth.ts`, `app/api/**` | **IMPLEMENTED / BLOCKED (Live)** | Server-side bearer token verification implemented; live Supabase Auth test pending approved project. |
+| **SEC-002** | P0 | Tenant Isolation | `src/auth/serverAuth.ts`, scan/document services, API routes | **IMPLEMENTED / BLOCKED (Live)** | Tenant ownership check enforced in routes; live RLS verification pending approved project. |
+| **SEC-003** | P0 | RBAC & Permissions | `src/auth/serverAuth.ts`, mutation routes | **IMPLEMENTED / BLOCKED (Live)** | Role checks (`ANALYST`, `ADMIN`, `OWNER`) enforced; live RBAC test pending approved project. |
 | **SEC-004** | P0 | PostgreSQL RLS | `supabase/schema.sql`, database migrations | **BLOCKED** | Requires ordered execution of schema migrations on approved Supabase test project. |
-| **SEC-005** | P0 | Supabase Storage | Storage policies, `supabaseStorage.ts`, download routes | **BLOCKED** | Requires private buckets `quarantine`, `invoices`, `reports` configured in Supabase. |
+| **SEC-005** | P0 | Supabase Storage | `src/services/supabaseStorage.ts`, download routes | **IMPLEMENTED / BLOCKED (Live)** | Private bucket path structure enforced; live bucket policy verification pending approved project. |
 | **SEC-006** | P0 | Processing State Machine | Scan/document services, process route, worker | **BLOCKED** | Fail-closed state machine requires durable DB status and scanner checks. |
 | **SEC-007** | P0 | Malware Inspection | `malwareScanner.ts`, `securityScanner.ts`, worker | **BLOCKED** | Requires deployed malware scanning service (e.g. ClamAV). |
 | **DATA-001** | P1 | Durable Persistence | `scanService.ts`, PostgreSQL repositories | **BLOCKED** | Replacement of process-local Maps with Supabase PostgreSQL tables. |

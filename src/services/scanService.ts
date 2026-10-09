@@ -226,4 +226,12 @@ export class ScanService {
 
     return scan;
   }
+
+  public static async deleteScan(scanId: string, organizationId: string): Promise<void> {
+    activeScans.delete(scanId);
+    scanFiles.delete(scanId);
+    try {
+      await SupabaseDbService.deleteScanSession(scanId, organizationId);
+    } catch (_) {}
+  }
 }

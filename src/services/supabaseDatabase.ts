@@ -154,4 +154,10 @@ export class SupabaseDbService {
 
     return data || [];
   }
+
+  public static async deleteScanSession(scanId: string, organizationId: string): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+    const supabase = getSupabase();
+    await supabase.from('scan_sessions').delete().eq('session_id', scanId);
+  }
 }

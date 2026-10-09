@@ -3,17 +3,23 @@ import { ScanService } from '@/src/services/scanService';
 import { PdfReportService } from '@/src/services/pdfReportService';
 import { uploadReportToSupabase } from '@/src/services/supabaseStorage';
 import { isSupabaseConfigured } from '@/src/services/supabaseClient';
+import { verifyServerAuth } from '@/src/auth/serverAuth';
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ scanId: string }> }
 ) {
   try {
+    const auth = await verifyServerAuth(req);
     const { scanId } = await params;
     const scan = await ScanService.getScan(scanId);
 
     if (!scan) {
       return NextResponse.json({ error: 'Scan session not found' }, { status: 404 });
+    }
+
+    if (scan.organization_id && scan.organization_id !== auth.organizationId) {
+      return NextResponse.json({ error: 'Forbidden: Cross-tenant resource access denied' }, { status: 403 });
     }
 
     // Render PDF report buffer
@@ -38,8 +44,11 @@ export async function GET(
     if (format === 'json' && downloadUrl) {
       return NextResponse.json({
         report_id: `rep_${scanId}`,
+        scan_id: scanId,
+        organization_id: auth.organizationId,
         download_url: downloadUrl,
-        rule_pack_version: '2026.1-GA',
+        file_name: fileName,
+        created_at: new Date().toISOString(),
       });
     }
 
@@ -50,9 +59,11 @@ export async function GET(
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${fileName}"`,
+        'Cache-Control': 'private, no-store, max-age=0',
       },
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Report generation failed' }, { status: 500 });
+    const status = err.message.includes('Unauthorized') ? 401 : 500;
+    return NextResponse.json({ error: err.message || 'Report generation failed' }, { status });
   }
 }
