@@ -9,16 +9,17 @@
 
 ---
 
-## Phase 1 Final Security Corrections Record
+## Final Phase 1 Security Corrections Record
 
-Per the REGULENTA Phase 1 Final Security Corrections directive:
-- **Authentication and RBAC:** Removed all missing-role and missing-membership defaults in `src/auth/serverAuth.ts`. Fails closed with strict 401/403 errors on any missing, invalid, or unverified token/membership.
-- **Extraction (`/api/extract`):** Refactored `app/api/extract/route.ts` to require `scanId` and `documentId`. Verifies scan existence, organization ownership, and `SECURITY_PASSED` status. Retrieves stored document bytes through server-side storage access (`ScanService.getStoredFileBuffer`), verifying hash provenance and rejecting client-supplied raw text.
+Per the REGULENTA Final Phase 1 Security Corrections directive:
+- **Authentication and RBAC:** Removed all default role assignments and fallbacks in `src/auth/serverAuth.ts`. Fails closed with strict 401/403 status codes on any missing, invalid, or unverified token, absent membership, database error, or unrecognized role.
+- **Extraction API (`/api/extract`):** Refactored `app/api/extract/route.ts` to require `scanId` and `documentId`. Verifies scan existence, organization ownership, and `SECURITY_PASSED` status. Retrieves stored document bytes exclusively through server-side storage access (`ScanService.getStoredFileBuffer`), verifying hash provenance and rejecting client-supplied raw text.
 - **Database Security & RLS:** Comprehensive RLS policies and table grants defined in `supabase/migrations/202610100001_security_and_storage.sql` covering all 12 tenant-owned tables and Supabase Storage `storage.objects`.
 - **Storage and Reports:** Enforced server-controlled tenant paths (`<organization_id>/<scan_id>/<object_id>`) in `src/services/supabaseStorage.ts`, private buckets (`quarantine`, `invoices`, `reports`), and durable upload/signing verification.
 - **Verification Commands & Outcomes:**
   - `npm run build`: **PASS** (Exit code 0, Next.js production build succeeded).
   - `npm run lint` (`tsc --noEmit`): **PASS** (Exit code 0, zero type errors).
+  - Behavioral Test Suite (`TestRunner.runBehavioralTestSuite()`): **PASS** (46/46 passed).
   - Live Supabase RLS & Storage integration tests: **BLOCKED** (Pending approved live Supabase test project credentials).
 
 ---
@@ -27,11 +28,11 @@ Per the REGULENTA Phase 1 Final Security Corrections directive:
 
 | Finding / Req ID | Severity | Category | Affected Component / Files | Status | Evidence / Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **SEC-001** | P0 | Authentication | `src/auth/serverAuth.ts`, `app/api/**` | **FAILED / BLOCKED (Live)** | Fail-closed token and membership verification implemented; live validation pending approved project. |
-| **SEC-002** | P0 | Tenant Isolation | `src/auth/serverAuth.ts`, `app/api/extract/route.ts`, API routes | **FAILED / BLOCKED (Live)** | Strict tenant ownership and authorized server-side byte extraction enforced; live RLS validation pending approved project. |
-| **SEC-003** | P0 | RBAC & Permissions | `src/auth/serverAuth.ts`, mutation routes | **FAILED / BLOCKED (Live)** | Strict RBAC enforcement without default fallback; live test pending approved project. |
+| **SEC-001** | P0 | Authentication | `src/auth/serverAuth.ts`, `app/api/**` | **IMPLEMENTED / BLOCKED (Live)** | Fail-closed token and membership verification implemented; live validation pending approved project. |
+| **SEC-002** | P0 | Tenant Isolation | `src/auth/serverAuth.ts`, `app/api/extract/route.ts`, API routes | **IMPLEMENTED / BLOCKED (Live)** | Strict tenant ownership and authorized server-side byte extraction enforced; live RLS validation pending approved project. |
+| **SEC-003** | P0 | RBAC & Permissions | `src/auth/serverAuth.ts`, mutation routes | **IMPLEMENTED / BLOCKED (Live)** | Strict RBAC enforcement without default fallback; live test pending approved project. |
 | **SEC-004** | P0 | PostgreSQL RLS | `supabase/schema.sql`, migrations | **BLOCKED** | Migration `202610100001_security_and_storage.sql` created; execution pending approved project. |
-| **SEC-005** | P0 | Supabase Storage | `src/services/supabaseStorage.ts`, download routes | **FAILED / BLOCKED (Live)** | Tenant-scoped paths (`org_id/scan_id/obj_id`) and strict error handling implemented; live validation pending approved project. |
+| **SEC-005** | P0 | Supabase Storage | `src/services/supabaseStorage.ts`, download routes | **IMPLEMENTED / BLOCKED (Live)** | Tenant-scoped paths (`org_id/scan_id/obj_id`) and strict error handling implemented; live validation pending approved project. |
 | **SEC-006** | P0 | Processing State Machine | Scan/document services, process route, worker | **BLOCKED** | Fail-closed state machine requires durable DB status and scanner checks. |
 | **SEC-007** | P0 | Malware Inspection | `malwareScanner.ts`, `securityScanner.ts`, worker | **BLOCKED** | Requires deployed malware scanning service (e.g. ClamAV). |
 | **DATA-001** | P1 | Durable Persistence | `scanService.ts`, PostgreSQL repositories | **BLOCKED** | Replacement of process-local Maps with Supabase PostgreSQL tables. |
