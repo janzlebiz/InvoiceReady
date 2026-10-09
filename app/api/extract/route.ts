@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { GeminiExtractor } from '@/src/services/geminiExtractor';
 import { verifyServerAuth } from '@/src/auth/serverAuth';
 import { ScanService } from '@/src/services/scanService';
+import { DocumentParser } from '@/src/services/documentParser';
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,27 +12,45 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { fileName, rawText, mimeType, scanId } = body;
+    const { scanId, documentId } = body;
 
-    if (!fileName || !rawText) {
+    if (!scanId || !documentId) {
       return NextResponse.json(
-        { error: 'Missing required extraction parameters: fileName and rawText.' },
+        { error: 'Missing required parameters: scanId and documentId are mandatory for secure extraction.' },
         { status: 400 }
       );
     }
 
-    if (scanId) {
-      const scan = await ScanService.getScan(scanId);
-      if (scan && scan.organization_id && scan.organization_id !== auth.organizationId) {
-        return NextResponse.json({ error: 'Forbidden: Cross-tenant resource access denied' }, { status: 403 });
-      }
+    const scan = await ScanService.getScan(scanId);
+    if (!scan) {
+      return NextResponse.json({ error: 'Scan session not found' }, { status: 404 });
     }
 
+    if (scan.organization_id && scan.organization_id !== auth.organizationId) {
+      return NextResponse.json({ error: 'Forbidden: Cross-tenant resource access denied' }, { status: 403 });
+    }
+
+    if (scan.status !== 'SECURITY_PASSED' && scan.status !== 'COMPLETED' && scan.status !== 'REVIEW_REQUIRED') {
+      return NextResponse.json({ error: 'Forbidden: Document has not passed security and malware inspection.' }, { status: 400 });
+    }
+
+    // Retrieve authorized stored bytes server-side
+    const fileBytes = ScanService.getStoredFileBuffer(scanId);
+    if (!fileBytes || fileBytes.length === 0) {
+      return NextResponse.json({ error: 'Authorized stored document bytes not found in server quarantine/storage.' }, { status: 404 });
+    }
+
+    const rawText = await DocumentParser.extractDocumentText(
+      fileBytes,
+      scan.document_name || 'invoice.pdf',
+      scan.document_mime_type || 'application/pdf'
+    );
+
     const result = await GeminiExtractor.extractInvoice(
-      fileName,
+      scan.document_name || 'invoice.pdf',
       rawText,
-      mimeType || 'application/pdf',
-      scanId || `scan_${Date.now().toString(36)}`
+      scan.document_mime_type || 'application/pdf',
+      scanId
     );
 
     return NextResponse.json(result);

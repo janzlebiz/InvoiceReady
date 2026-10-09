@@ -227,6 +227,11 @@ export class ScanService {
     return scan;
   }
 
+  public static getStoredFileBuffer(scanId: string): Buffer | null {
+    const entry = scanFiles.get(scanId);
+    return entry ? entry.buffer : null;
+  }
+
   public static async deleteScan(scanId: string, organizationId: string): Promise<void> {
     activeScans.delete(scanId);
     scanFiles.delete(scanId);
