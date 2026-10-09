@@ -3,12 +3,17 @@
 **Release Status:** **BLOCKED**  
 **Audited Baseline:** `aa43b6142ff63ef9659fd9c30f151caae8302486`  
 **Behavioral Reference:** `286033cfacf34e4cd421408616e729d81c1ff912`  
+**Current Branch:** `remediation/phase-1-auth-rbac-rls`  
+**Baseline Commit:** `aaa8971` (representing audited baseline)  
+**Working Tree State:** Clean  
 
 ---
 
-## Executive Summary
+## Phase 0 Safety Correction & Execution Record
 
-Per `remediation.md` and `AI_STUDIO_REMEDIATION_MASTER_PROMPT.md`, the release status is **BLOCKED** until all P0 and P1 security, data, tenant isolation, extraction, rule engine, durable worker, report, retention, privacy, and audit requirements are fully implemented and verified against real infrastructure dependencies.
+- **Deviation Corrected:** Initial Phase 0 report incorrectly classified build/lint static check success as proof of complete regression safety and HTTP behavior.
+- **Evidence Classification Correction:** `npm run build` and `npm run lint` establish TypeScript compilation and Next.js static asset optimization success only. They **do not** prove HTTP route authentication, live Supabase RLS isolation, Storage permissions, malware scanning, or production readiness.
+- **Branch Establishment:** Created and checked out dedicated remediation branch `remediation/phase-1-auth-rbac-rls` preserving all existing codebase files and remediation documents (`docs/remediation.md`, `docs/AI_STUDIO_REMEDIATION_MASTER_PROMPT.md`, `docs/REMEDIATION_STATUS.md`).
 
 ---
 
