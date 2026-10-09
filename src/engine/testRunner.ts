@@ -461,10 +461,12 @@ export class TestRunner {
     {
       const t0 = performance.now();
       const appFile = fs.readFileSync(path.resolve('./src/App.tsx'), 'utf8');
-      const mainFile = fs.readFileSync(path.resolve('./src/main.tsx'), 'utf8');
+      const pageFile = fs.existsSync(path.resolve('./app/page.tsx'))
+        ? fs.readFileSync(path.resolve('./app/page.tsx'), 'utf8')
+        : '';
 
       const prohibitedStrings = ['GEMINI_API_KEY', 'DATABASE_URL', 'JWT_SECRET', 'serviceAccountKey'];
-      const leakDetected = prohibitedStrings.some((s) => appFile.includes(s) || mainFile.includes(s));
+      const leakDetected = prohibitedStrings.some((s) => appFile.includes(s) || pageFile.includes(s));
 
       results.push({
         testId: 'SEC-BUNDLE-SCAN-001',
@@ -993,11 +995,11 @@ export class TestRunner {
     {
       const t0 = performance.now();
       const appFile = fs.readFileSync(path.resolve('./src/App.tsx'), 'utf8');
-      const clientAuthFile = fs.readFileSync(path.resolve('./src/services/firebaseClient.ts'), 'utf8');
+      const clientAuthFile = fs.readFileSync(path.resolve('./src/services/supabaseClient.ts'), 'utf8');
 
       const hasDevTokenInApp = appFile.includes('dev_preview_token');
       const hasDevTokenInClientAuth = clientAuthFile.includes('dev_preview_token');
-      const usesRealClientAuth = appFile.includes('getClientAuthHeader') && clientAuthFile.includes('clientAuth');
+      const usesRealClientAuth = appFile.includes('getClientAuthHeader') && clientAuthFile.includes('getSupabase');
 
       const pass = !hasDevTokenInApp && !hasDevTokenInClientAuth && usesRealClientAuth;
 

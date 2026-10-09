@@ -107,6 +107,9 @@ export class JobQueue {
         console.warn('Supervisor queue sweep warning:', err.message)
       );
     }, 10000);
+    if (this.supervisorTimer && typeof this.supervisorTimer.unref === 'function') {
+      this.supervisorTimer.unref();
+    }
   }
 
   public static stopWorkerSupervisor(): void {

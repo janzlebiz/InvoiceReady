@@ -22,7 +22,7 @@ export function getSupabase(): SupabaseClient {
     const placeholderUrl = 'https://placeholder-project.supabase.co';
     const placeholderKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder';
     clientInstance = createClient(placeholderUrl, placeholderKey, {
-      auth: { persistSession: true },
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
     });
     return clientInstance;
   }
@@ -41,6 +41,9 @@ export function getSupabase(): SupabaseClient {
 export const supabase = getSupabase();
 
 export async function getAuthHeaders(): Promise<Record<string, string>> {
+  if (!isSupabaseConfigured()) {
+    return {};
+  }
   try {
     const client = getSupabase();
     const { data: { session } } = await client.auth.getSession();
