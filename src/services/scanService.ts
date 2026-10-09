@@ -145,7 +145,7 @@ export class ScanService {
     let storagePath = `invoices/${scanId}/${fileName}`;
     if (isSupabaseConfigured()) {
       const uint8 = new Uint8Array(fileBuffer);
-      const uploadRes = await uploadInvoiceToSupabase(new Blob([uint8]), fileName, userId);
+      const uploadRes = await uploadInvoiceToSupabase(new Blob([uint8]), fileName, scan.organization_id || 'org_main', scanId);
       if (uploadRes.path) {
         storagePath = uploadRes.path;
       }

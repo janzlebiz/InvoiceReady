@@ -9,21 +9,14 @@
 
 ---
 
-## Phase 0 Safety Correction & Execution Record
+## Phase 1 Security Remediation Rework Record
 
-- **Deviation Corrected:** Initial Phase 0 report incorrectly classified build/lint static check success as proof of complete regression safety and HTTP behavior.
-- **Evidence Classification Correction:** `npm run build` and `npm run lint` establish TypeScript compilation and Next.js static asset optimization success only. They **do not** prove HTTP route authentication, live Supabase RLS isolation, Storage permissions, malware scanning, or production readiness.
-- **Branch Establishment:** Created and checked out dedicated remediation branch `remediation/phase-1-auth-rbac-rls` preserving all existing codebase files and remediation documents (`docs/remediation.md`, `docs/AI_STUDIO_REMEDIATION_MASTER_PROMPT.md`, `docs/REMEDIATION_STATUS.md`).
-
----
-
-## Phase 1 Implementation & Verification Record
-
-- **SEC-001 (Authentication):** **IMPLEMENTED / BLOCKED (Live)** — Server-side token verification implemented in `src/auth/serverAuth.ts` and integrated across all protected Next.js API routes (`/api/scans`, `/api/scans/[scanId]`, `/api/scans/[scanId]/documents`, `/api/scans/[scanId]/process`, `/api/scans/[scanId]/report/pdf`). Live execution evidence against a real Supabase Auth project remains `BLOCKED`.
-- **SEC-002 (Tenant Isolation):** **IMPLEMENTED / BLOCKED (Live)** — Strict organization ID enforcement and cross-tenant checks implemented across all API handlers. Live multi-tenant RLS acceptance verification remains `BLOCKED`.
-- **SEC-003 (RBAC & Permissions):** **IMPLEMENTED / BLOCKED (Live)** — Server-side role derivation (`VIEWER`, `ANALYST`, `ADMIN`, `OWNER`) enforced on mutation routes. Live privilege escalation testing remains `BLOCKED`.
-- **SEC-004 (PostgreSQL RLS):** **NOT STARTED / BLOCKED (Live)** — Ordered Supabase migrations pending approved test project execution.
-- **SEC-005 (Supabase Storage):** **IMPLEMENTED / BLOCKED (Live)** — Storage service paths bound to server-controlled tenant scope (`organization_id/scan_id/...`) and private buckets. Live bucket policy verification remains `BLOCKED`.
+Per the Phase 1 Security Remediation Rework directive:
+- **SEC-001 (Authentication):** **FAILED** — Fail-closed verification implemented in `src/auth/serverAuth.ts` (removed all synthetic preview users, default organization/role assignments, and substring matching). Live verification against an approved Supabase project remains `BLOCKED`.
+- **SEC-002 (Tenant Isolation):** **FAILED** — Strict tenant verification enforced across all protected routes (`/api/scans`, `/api/scans/[scanId]`, `/api/scans/[scanId]/documents`, `/api/scans/[scanId]/process`, `/api/scans/[scanId]/report/pdf`, `/api/extract`). Live PostgREST RLS multi-tenant testing remains `BLOCKED`.
+- **SEC-003 (RBAC & Permissions):** **FAILED** — Server-side role derivation enforced without fail-open fallback. Live privilege escalation testing remains `BLOCKED`.
+- **SEC-004 (PostgreSQL RLS):** **BLOCKED** — Security migration `supabase/migrations/202610100001_security_and_storage.sql` created; execution against live Supabase project remains `BLOCKED`.
+- **SEC-005 (Supabase Storage):** **FAILED** — `src/services/supabaseStorage.ts` updated to enforce mandatory tenant path scoping (`<org_id>/<scan_id>/<object_id>`), private buckets, no local fallbacks, and strict error propagation. Live bucket policy verification remains `BLOCKED`.
 
 ---
 
@@ -31,11 +24,11 @@
 
 | Finding / Req ID | Severity | Category | Affected Component / Files | Status | Evidence / Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **SEC-001** | P0 | Authentication | `src/auth/serverAuth.ts`, `app/api/**` | **IMPLEMENTED / BLOCKED (Live)** | Server-side bearer token verification implemented; live Supabase Auth test pending approved project. |
-| **SEC-002** | P0 | Tenant Isolation | `src/auth/serverAuth.ts`, scan/document services, API routes | **IMPLEMENTED / BLOCKED (Live)** | Tenant ownership check enforced in routes; live RLS verification pending approved project. |
-| **SEC-003** | P0 | RBAC & Permissions | `src/auth/serverAuth.ts`, mutation routes | **IMPLEMENTED / BLOCKED (Live)** | Role checks (`ANALYST`, `ADMIN`, `OWNER`) enforced; live RBAC test pending approved project. |
-| **SEC-004** | P0 | PostgreSQL RLS | `supabase/schema.sql`, database migrations | **BLOCKED** | Requires ordered execution of schema migrations on approved Supabase test project. |
-| **SEC-005** | P0 | Supabase Storage | `src/services/supabaseStorage.ts`, download routes | **IMPLEMENTED / BLOCKED (Live)** | Private bucket path structure enforced; live bucket policy verification pending approved project. |
+| **SEC-001** | P0 | Authentication | `src/auth/serverAuth.ts`, `app/api/**` | **FAILED** | Fail-closed token verification implemented; live validation pending approved Supabase project. |
+| **SEC-002** | P0 | Tenant Isolation | `src/auth/serverAuth.ts`, scan/document services, API routes | **FAILED** | Strict tenant checks enforced in routes; live RLS validation pending approved project. |
+| **SEC-003** | P0 | RBAC & Permissions | `src/auth/serverAuth.ts`, mutation routes | **FAILED** | Strict RBAC enforcement without fallback; live test pending approved project. |
+| **SEC-004** | P0 | PostgreSQL RLS | `supabase/schema.sql`, migrations | **BLOCKED** | Migration `202610100001_security_and_storage.sql` created; execution pending approved project. |
+| **SEC-005** | P0 | Supabase Storage | `src/services/supabaseStorage.ts`, download routes | **FAILED** | Tenant-scoped paths and strict error handling implemented; live validation pending approved project. |
 | **SEC-006** | P0 | Processing State Machine | Scan/document services, process route, worker | **BLOCKED** | Fail-closed state machine requires durable DB status and scanner checks. |
 | **SEC-007** | P0 | Malware Inspection | `malwareScanner.ts`, `securityScanner.ts`, worker | **BLOCKED** | Requires deployed malware scanning service (e.g. ClamAV). |
 | **DATA-001** | P1 | Durable Persistence | `scanService.ts`, PostgreSQL repositories | **BLOCKED** | Replacement of process-local Maps with Supabase PostgreSQL tables. |

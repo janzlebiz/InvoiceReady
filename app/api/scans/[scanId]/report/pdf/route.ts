@@ -33,7 +33,7 @@ export async function GET(
     // If Supabase Storage is configured, upload to Supabase 'reports' bucket
     let downloadUrl: string | undefined;
     if (isSupabaseConfigured()) {
-      const uploadRes = await uploadReportToSupabase(pdfBuffer, fileName);
+      const uploadRes = await uploadReportToSupabase(pdfBuffer, fileName, auth.organizationId, scanId);
       if (uploadRes.url) {
         downloadUrl = uploadRes.url;
       }

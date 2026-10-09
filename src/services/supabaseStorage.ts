@@ -1,3 +1,9 @@
+/**
+ * InvoiceReady v1.0 - Supabase Storage Service (Strict Tenant Path Scoping)
+ * Enforces SEC-005: private buckets, tenant paths (<org_id>/<scan_id>/<object_id>),
+ * no local-path fallback disguised as durable success, and strict error propagation.
+ */
+
 import { getSupabase, isSupabaseConfigured } from './supabaseClient';
 
 export interface StorageUploadResult {
@@ -7,97 +13,106 @@ export interface StorageUploadResult {
 }
 
 /**
- * Uploads an invoice document to Supabase Storage bucket 'invoices'
+ * Uploads an invoice document to Supabase Storage private bucket 'invoices'
+ * Path structure: <organization_uuid>/<scan_uuid>/<object_uuid>
  */
 export async function uploadInvoiceToSupabase(
-  file: File | Blob,
+  file: File | Blob | Buffer,
   fileName: string,
-  userId?: string
+  organizationId: string,
+  scanId: string
 ): Promise<StorageUploadResult> {
+  if (!organizationId || !scanId) {
+    throw new Error('Storage upload failed: organizationId and scanId are mandatory for tenant path scoping.');
+  }
+
   if (!isSupabaseConfigured()) {
-    // Offline / Demo mode fallback
-    return {
-      path: `local_demo/${Date.now()}_${fileName}`,
-      url: URL.createObjectURL(file),
-    };
+    throw new Error('Storage upload failed: Supabase Storage is not configured for production use.');
   }
 
   const supabase = getSupabase();
-  const timestamp = Date.now();
-  const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-  const path = `${userId || 'anonymous'}/${timestamp}_${safeName}`;
+  const objectUuid = `obj_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const path = `${organizationId}/${scanId}/${objectUuid}`;
 
   const { error: uploadError } = await supabase.storage
     .from('invoices')
     .upload(path, file, {
       cacheControl: '3600',
-      upsert: true,
-      contentType: file.type || 'application/pdf',
+      upsert: false, // Disallow overwrite by default (SEC-005)
+      contentType: (file as any).type || 'application/pdf',
     });
 
   if (uploadError) {
-    console.warn('Supabase storage upload error:', uploadError.message);
-    return { path, error: uploadError.message };
+    throw new Error(`Supabase storage upload error: ${uploadError.message}`);
   }
 
-  // Generate a signed URL valid for 2 hours
   const { data: signedData, error: signError } = await supabase.storage
     .from('invoices')
     .createSignedUrl(path, 7200);
 
-  if (signError) {
-    return { path, error: signError.message };
+  if (signError || !signedData) {
+    throw new Error(`Supabase storage sign URL error: ${signError?.message || 'Failed to create signed URL'}`);
   }
 
-  return { path, url: signedData?.signedUrl };
+  return { path, url: signedData.signedUrl };
 }
 
 /**
- * Uploads a generated compliance report PDF to Supabase Storage bucket 'reports'
+ * Uploads a generated compliance report PDF to Supabase Storage private bucket 'reports'
+ * Path structure: <organization_uuid>/<scan_uuid>/<object_uuid>
  */
 export async function uploadReportToSupabase(
-  pdfBlobOrBuffer: Blob | Uint8Array,
+  pdfBlobOrBuffer: Blob | Uint8Array | Buffer,
   fileName: string,
-  userId?: string
+  organizationId: string,
+  scanId: string
 ): Promise<StorageUploadResult> {
+  if (!organizationId || !scanId) {
+    throw new Error('Report upload failed: organizationId and scanId are mandatory for tenant path scoping.');
+  }
+
   if (!isSupabaseConfigured()) {
-    return {
-      path: `local_reports/${Date.now()}_${fileName}`,
-      url: typeof window !== 'undefined' ? URL.createObjectURL(new Blob([pdfBlobOrBuffer as any])) : '',
-    };
+    throw new Error('Report upload failed: Supabase Storage is not configured for production use.');
   }
 
   const supabase = getSupabase();
-  const timestamp = Date.now();
-  const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
-  const path = `${userId || 'system'}/${timestamp}_${safeName}`;
+  const objectUuid = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  const path = `${organizationId}/${scanId}/${objectUuid}`;
 
   const { error: uploadError } = await supabase.storage
     .from('reports')
     .upload(path, pdfBlobOrBuffer, {
       cacheControl: '3600',
-      upsert: true,
+      upsert: false,
       contentType: 'application/pdf',
     });
 
   if (uploadError) {
-    return { path, error: uploadError.message };
+    throw new Error(`Supabase report upload error: ${uploadError.message}`);
   }
 
-  const { data: signedData } = await supabase.storage
+  const { data: signedData, error: signError } = await supabase.storage
     .from('reports')
     .createSignedUrl(path, 86400); // 24h
 
-  return { path, url: signedData?.signedUrl };
+  if (signError || !signedData) {
+    throw new Error(`Supabase report sign URL error: ${signError?.message || 'Failed to create signed URL'}`);
+  }
+
+  return { path, url: signedData.signedUrl };
 }
 
 /**
- * Retrieves a download/view signed URL for a file in Supabase Storage
+ * Retrieves an authorized download/view signed URL for a file in Supabase Storage
  */
-export async function getSupabaseSignedUrl(bucket: 'invoices' | 'reports', path: string): Promise<string | null> {
-  if (!isSupabaseConfigured()) return null;
+export async function getSupabaseSignedUrl(bucket: 'invoices' | 'reports' | 'quarantine', path: string): Promise<string> {
+  if (!isSupabaseConfigured()) {
+    throw new Error('Storage service is not configured.');
+  }
   const supabase = getSupabase();
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 3600);
-  if (error || !data) return null;
+  if (error || !data) {
+    throw new Error(`Failed to create signed URL: ${error?.message || 'Unknown error'}`);
+  }
   return data.signedUrl;
 }
