@@ -6,6 +6,15 @@ const nextConfig = {
     ignoreBuildErrors: false,
   },
   serverExternalPackages: ['pdfkit', 'pdf-parse'],
+  async redirects() {
+    return [
+      {
+        source: '/index.html',
+        destination: '/',
+        permanent: false,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
