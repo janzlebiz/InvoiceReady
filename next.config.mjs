@@ -5,7 +5,7 @@ const nextConfig = {
     // Allows production build to succeed while maintaining dev strictness
     ignoreBuildErrors: false,
   },
-  serverExternalPackages: ['pdfkit', 'pdf-parse'],
+  serverExternalPackages: ['pdfkit', 'pdf-parse', '@google-cloud/tasks', '@google-cloud/storage'],
   async redirects() {
     return [
       {

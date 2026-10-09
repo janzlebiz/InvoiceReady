@@ -56,7 +56,11 @@ export async function verifyServerAuth(req: NextRequest): Promise<ServerAuthCont
 
   // If user belongs to multiple organizations, check for explicit header selector
   let selectedOrgId = memberships[0].organization_id;
-  let selectedRole = memberships[0].role || 'ANALYST';
+  const rawRole = memberships[0].role;
+  if (!rawRole || !['OWNER', 'ADMIN', 'ANALYST', 'VIEWER'].includes(rawRole)) {
+    throw new AuthError('Forbidden: Organization membership role missing or unverified.', 403);
+  }
+  let selectedRole = rawRole as 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER';
 
   const requestedOrgId = req.headers.get('x-organization-id');
   if (requestedOrgId) {
@@ -64,8 +68,12 @@ export async function verifyServerAuth(req: NextRequest): Promise<ServerAuthCont
     if (!matched) {
       throw new AuthError('Forbidden: Requested organization ID is not associated with this user.', 403);
     }
+    const matchedRole = matched.role;
+    if (!matchedRole || !['OWNER', 'ADMIN', 'ANALYST', 'VIEWER'].includes(matchedRole)) {
+      throw new AuthError('Forbidden: Requested organization membership role missing or unverified.', 403);
+    }
     selectedOrgId = matched.organization_id;
-    selectedRole = matched.role || 'ANALYST';
+    selectedRole = matchedRole as 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER';
   } else if (memberships.length > 1) {
     // If multiple memberships exist and no header is provided, fail closed or require header
     throw new AuthError('Forbidden: Multiple organization memberships detected. Provide x-organization-id header.', 403);

@@ -176,16 +176,25 @@ export class ScanService {
     scan.system_profile = systemProfile;
     activeScans.set(scanId, scan);
 
-    // 1. Extract text and canonical schema
-    const storedFile = scanFiles.get(scanId);
-    let rawText = '';
-    if (storedFile) {
-      rawText = await DocumentParser.extractDocumentText(storedFile.buffer, storedFile.filename, storedFile.mimeType);
+    // 1. Extract text and canonical schema from durable private storage
+    const fileBuffer = await this.getStoredFileBuffer(scanId);
+    if (!fileBuffer || fileBuffer.length === 0) {
+      throw new Error('Persisted document bytes not found in durable private storage.');
+    }
+
+    const rawText = await DocumentParser.extractDocumentText(
+      fileBuffer,
+      scan.document_name || 'invoice.pdf',
+      scan.document_mime_type || 'application/pdf'
+    );
+
+    if (!rawText || rawText.trim().length === 0) {
+      throw new Error('Document text extraction failed: no extractable text found in stored file.');
     }
 
     const extraction = await GeminiExtractor.extractInvoice(
       scan.document_name || 'invoice.pdf',
-      rawText || 'Standard B2B tax invoice',
+      rawText,
       scan.document_mime_type || 'application/pdf',
       scanId
     );
@@ -222,21 +231,41 @@ export class ScanService {
     activeScans.set(scanId, scan);
 
     // 5. Persist to Supabase PostgreSQL database
-    await SupabaseDbService.saveScanSession(scan, businessProfile, systemProfile);
+    const saveRes = await SupabaseDbService.saveScanSession(scan, businessProfile, systemProfile);
+    if (!saveRes.success) {
+      throw new Error(`Failed to durably persist scan session: ${saveRes.error}`);
+    }
 
     return scan;
   }
 
-  public static getStoredFileBuffer(scanId: string): Buffer | null {
+  public static async getStoredFileBuffer(scanId: string): Promise<Buffer | null> {
     const entry = scanFiles.get(scanId);
-    return entry ? entry.buffer : null;
+    if (entry) return entry.buffer;
+
+    if (isSupabaseConfigured()) {
+      const scan = await this.getScan(scanId);
+      if (scan && scan.storage_path) {
+        const supabase = getSupabase();
+        const { data, error } = await supabase.storage.from('invoices').download(scan.storage_path);
+        if (data && !error) {
+          const arrayBuffer = await data.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          scanFiles.set(scanId, {
+            buffer,
+            filename: scan.document_name || 'invoice.pdf',
+            mimeType: scan.document_mime_type || 'application/pdf',
+          });
+          return buffer;
+        }
+      }
+    }
+    return null;
   }
 
   public static async deleteScan(scanId: string, organizationId: string): Promise<void> {
     activeScans.delete(scanId);
     scanFiles.delete(scanId);
-    try {
-      await SupabaseDbService.deleteScanSession(scanId, organizationId);
-    } catch (_) {}
+    await SupabaseDbService.deleteScanSession(scanId, organizationId);
   }
 }

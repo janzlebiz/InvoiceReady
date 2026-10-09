@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Retrieve authorized stored bytes server-side
-    const fileBytes = ScanService.getStoredFileBuffer(scanId);
+    const fileBytes = await ScanService.getStoredFileBuffer(scanId);
     if (!fileBytes || fileBytes.length === 0) {
       return NextResponse.json({ error: 'Authorized stored document bytes not found in server quarantine/storage.' }, { status: 404 });
     }
