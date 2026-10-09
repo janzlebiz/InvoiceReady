@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useRef } from 'react';
 import { SAMPLE_INVOICES, SampleInvoicePackage } from '../engine/sampleInvoices';
 import {

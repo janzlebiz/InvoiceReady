@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { X, CheckCircle2, BookOpen, Layers } from 'lucide-react';
 

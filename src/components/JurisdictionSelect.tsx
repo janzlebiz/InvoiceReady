@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { JurisdictionCode } from '../engine/types';
 import { ArrowRight, Check, Building2, MapPin } from 'lucide-react';

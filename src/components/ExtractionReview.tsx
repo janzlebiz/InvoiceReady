@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { ExtractionResult, CanonicalInvoice, ExtractedFieldEvidence } from '../engine/types';
 import { CheckCircle2, AlertTriangle, ArrowRight, ArrowLeft, Edit3, ShieldAlert } from 'lucide-react';

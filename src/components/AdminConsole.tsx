@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { RuleRegistry } from '../rules/ruleRegistry';
 import { REGULATORY_SOURCES } from '../rules/sourcesRegistry';

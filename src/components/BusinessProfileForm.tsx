@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { BusinessProfile } from '../engine/types';
 import { ArrowRight, ArrowLeft, Building2, HelpCircle } from 'lucide-react';

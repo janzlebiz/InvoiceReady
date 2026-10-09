@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { Finding, RuleValidationResult, RuleSeverity } from '../engine/types';
 import {

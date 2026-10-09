@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, Loader2, ShieldCheck, FileSearch, Scale, BarChart3, FileText } from 'lucide-react';
 

@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { RemediationAction } from '../engine/types';
 import {

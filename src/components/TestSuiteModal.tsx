@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { TestCaseResult, TestSuiteOutcome } from '../engine/types';
 import { CheckCircle2, XCircle, PlayCircle, X, ShieldCheck, RefreshCw } from 'lucide-react';

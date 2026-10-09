@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { Navigation } from './components/Navigation';
 import { LandingScreen } from './components/LandingScreen';

@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { ScanSession, Scorecard } from '../engine/types';
 import {

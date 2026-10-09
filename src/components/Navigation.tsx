@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { ShieldCheck, PlayCircle, BookOpen, User, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';

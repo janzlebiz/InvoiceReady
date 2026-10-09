@@ -1,3 +1,5 @@
+'use client';
+
 import React from 'react';
 import { RuleRegistry } from '../rules/ruleRegistry';
 import {
