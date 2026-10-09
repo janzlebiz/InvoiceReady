@@ -1,4 +1,15 @@
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
+
+// Ensure any stale process on port 3000 is terminated before launching
+try {
+  const output = execSync("ss -lptn 'sport = :3000' 2>/dev/null || true").toString();
+  const match = output.match(/pid=(\d+)/);
+  if (match && match[1] && match[1] !== String(process.pid)) {
+    try {
+      process.kill(Number(match[1]), 'SIGKILL');
+    } catch (_) {}
+  }
+} catch (_) {}
 
 const rawArgs = process.argv.slice(2);
 const nextArgs = ['dev'];
