@@ -258,7 +258,7 @@ export class ScanService {
     }
 
     // 4. Durably insert document record into scan_documents table
-    await supabase.from('scan_documents').insert({
+    const { error: docInsertErr } = await supabase.from('scan_documents').insert({
       document_id: documentId,
       session_id: scanId,
       organization_id: organizationId,
@@ -270,6 +270,13 @@ export class ScanService {
       status: 'SECURITY_PASSED',
       created_at: new Date().toISOString(),
     });
+
+    if (docInsertErr) {
+      try {
+        await supabase.storage.from('invoices').remove([storagePath]);
+      } catch (_) {}
+      throw new Error(`Failed to durably record scan document metadata: ${docInsertErr.message}`);
+    }
 
     return {
       passed: true,
