@@ -21,16 +21,23 @@ The sole authoritative production stack is:
 
 ## 3. Verification Commands & Results
 - **Production Build**: `npm run build`
-  - Outcome: **PASS** (`Compiled successfully in 16.4s`, `Finished TypeScript in 3.2s`, 7/7 routes optimized).
+  - Outcome: **PASS**
 - **TypeScript Typecheck**: `npm run lint`
-  - Outcome: **PASS** (`tsc --noEmit` clean, 0 diagnostics).
+  - Outcome: **PASS**
 - **Live Supabase Integration**: `npm run test:supabase`
-  - Outcome: **PASS** (100% pass across RLS, bucket privacy, storage roundtrip, and schema cache checks).
-- **Legacy Term Grep**:
-  ```bash
-  grep -rnE "CLOUD_TASKS|GOOGLE_CLOUD|GCS_|FIREBASE|CloudTasksClient|CloudStorageService|firebase-admin|Cloud SQL" src/ app/ config/ scripts/ .env.example package.json next.config.mjs
-  ```
-  - Outcome: **0 occurrences found** (Clean codebase).
+  - Outcome: **PASS**
+- **Behavioral Test Suite**: `npm run test`
+  - Outcome: **FAIL** (3/49 failures identified)
+  - Remaining Blockers:
+    - Foreign key constraints in `job_queue` due to missing scan record in test data.
+    - `SEC-DOC-DELETED-001` - physical deletion verify failure.
+    - `OIDC-REJECT-EXPLICIT-IDENTITY-001` - OIDC strict identity check.
+
+## 4. Remaining Tasks for Release Gate
+- Fix behavioral test data setup in `src/engine/testRunner.ts`.
+- Finalize storage physical deletion logic to ensure prompt deletion.
+- Verify OIDC strict identity logic.
+- Final release validation.
 
 ## 4. Current Environment Configuration (`.env.example`)
 ```env

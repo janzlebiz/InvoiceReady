@@ -29,11 +29,20 @@ import { isSupabaseConfigured } from '../services/supabaseClient';
 export interface PgExecutor {
   query<T = any>(sql: string, params?: any[]): Promise<{ rows: T[]; rowCount?: number }>;
   exec(sql: string): Promise<void>;
+  close(): Promise<void>;
 }
 
 export class DatabaseService {
   private static client: PgExecutor | null = null;
   private static initialized = false;
+
+  public static async close(): Promise<void> {
+    if (this.client) {
+      await this.client.close();
+      this.client = null;
+      this.initialized = false;
+    }
+  }
 
   public static async query<T = any>(sql: string, params?: any[]): Promise<{ rows: T[]; rowCount?: number }> {
     await this.initialize();
@@ -78,6 +87,9 @@ export class DatabaseService {
           async exec(sql: string) {
             await pool.query(sql);
           },
+          async close() {
+            await pool.end();
+          },
         };
         console.log('Connected to authoritative Supabase PostgreSQL database.');
       } catch (err: any) {
@@ -95,6 +107,9 @@ export class DatabaseService {
         },
         async exec(sql: string) {
           await pglite.exec(sql);
+        },
+        async close() {
+          await pglite.close();
         },
       };
       console.log('Initialized Authoritative PostgreSQL Engine.');
@@ -422,6 +437,70 @@ export class DatabaseService {
     );
 
     return scan;
+  }
+
+  public static async saveScanSession(
+    session: ScanSession,
+    businessProfile?: BusinessProfile,
+    systemProfile?: SystemProfile
+  ): Promise<void> {
+    await this.initialize();
+    
+    // Begin transaction
+    await this.client!.exec('BEGIN');
+    try {
+      // Upsert scan
+      await this.client!.query(
+        `INSERT INTO scans (
+          scan_id, organization_id, jurisdiction, status, created_by,
+          business_profile, system_profile, rule_pack_version, created_at, uploaded_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+        ON CONFLICT (scan_id) DO UPDATE SET
+          status = EXCLUDED.status,
+          business_profile = EXCLUDED.business_profile,
+          system_profile = EXCLUDED.system_profile,
+          updated_at = NOW()`,
+        [
+          session.scan_id,
+          session.organization_id,
+          session.jurisdiction,
+          session.status,
+          'system', // userId placeholder or handle authentication
+          JSON.stringify(businessProfile || session.business_profile),
+          JSON.stringify(systemProfile || session.system_profile),
+          session.rule_pack_version,
+        ]
+      );
+
+      // Batch insert findings
+      if (session.findings && session.findings.length > 0) {
+        for (const f of session.findings) {
+          await this.client!.query(
+            `INSERT INTO findings (finding_id, session_id, organization_id, rule_id, severity, title, description, legal_reference)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (finding_id) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
+            [f.finding_id, session.scan_id, session.organization_id, f.rule_id, f.severity, f.title, f.description, f.regulatory_source?.locator || null]
+          );
+        }
+      }
+
+      // Batch insert remediations
+      if (session.remediation_plan && session.remediation_plan.length > 0) {
+        for (const r of session.remediation_plan) {
+          await this.client!.query(
+            `INSERT INTO remediations (remediation_id, session_id, organization_id, title, description, priority, category)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (remediation_id) DO UPDATE SET title = EXCLUDED.title, description = EXCLUDED.description`,
+            [r.action_id, session.scan_id, session.organization_id, r.title, r.problem || r.what_to_change, r.priority, r.category]
+          );
+        }
+      }
+
+      await this.client!.exec('COMMIT');
+    } catch (err) {
+      await this.client!.exec('ROLLBACK');
+      throw err;
+    }
   }
 
   public static async getScan(scanId: string, organizationId: string): Promise<ScanSession | null> {

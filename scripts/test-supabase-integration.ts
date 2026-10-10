@@ -123,7 +123,13 @@ async function runLiveSupabaseTests() {
   }
 
   console.log('--- INTEGRATION TEST SUMMARY ---');
-  console.log(allPassed ? 'ALL LIVE CHECKS PASSED SUCCESSFULLY' : 'SOME CHECKS ENCOUNTERED ISSUES');
+  if (allPassed) {
+    console.log('ALL LIVE CHECKS PASSED SUCCESSFULLY');
+    process.exit(0);
+  } else {
+    console.error('SOME CHECKS ENCOUNTERED ISSUES');
+    process.exit(1);
+  }
 }
 
 runLiveSupabaseTests().catch(err => {

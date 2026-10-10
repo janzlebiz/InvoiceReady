@@ -1781,6 +1781,8 @@ export class TestRunner {
     const durationMs = Math.round(performance.now() - startTime);
     const passed = results.filter((r) => r.status === 'PASS').length;
     const failed = results.filter((r) => r.status === 'FAIL').length;
+    
+    await DatabaseService.close();
 
     return {
       results,
