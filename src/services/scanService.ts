@@ -274,7 +274,27 @@ export class ScanService {
     if (docInsertErr) {
       try {
         await supabase.storage.from('invoices').remove([storagePath]);
-      } catch (_) {}
+      } catch (remErr) {
+        console.error('Storage cleanup failed during rollback:', remErr);
+      }
+
+      try {
+        await supabase
+          .from('scan_sessions')
+          .update({
+            file_name: 'pending_upload',
+            file_size_bytes: 0,
+            file_sha256: null,
+            storage_path: null,
+            status: 'CREATED',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('session_id', scanId)
+          .eq('organization_id', organizationId);
+      } catch (dbRollbackErr) {
+        console.error('Database scan session rollback failed:', dbRollbackErr);
+      }
+
       throw new Error(`Failed to durably record scan document metadata: ${docInsertErr.message}`);
     }
 

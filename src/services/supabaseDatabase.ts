@@ -32,8 +32,9 @@ export class SupabaseDbService {
 
     // 1. Get current authenticated user
     const { data: { user } } = await supabase.auth.getUser();
-
-    // 2. Insert/upsert scan session with mandatory organization_id
+    if (!user?.id) {
+      throw new Error('Database write rejected: Verified authenticated user identity is required.');
+    }
     const { error: sessionErr } = await supabase
       .from('scan_sessions')
       .upsert({
