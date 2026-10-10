@@ -408,11 +408,7 @@ DROP POLICY IF EXISTS "Members can view organization memberships" ON public.orga
 CREATE POLICY "Members can view organization memberships"
 ON public.organization_users FOR SELECT
 TO authenticated
-USING (
-  organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
-  )
-);
+USING (  (user_id)::text = (auth.uid())::text);
 
 -- Scan Sessions
 DROP POLICY IF EXISTS "Tenant members can view scan sessions" ON public.scan_sessions;
