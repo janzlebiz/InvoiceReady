@@ -1621,6 +1621,109 @@ export class TestRunner {
       });
     }
 
+    // PROC-QUEUE-SUPERVISOR-RECOVERY-001: Observable Queue Supervisor Expired-Lease Recovery
+    {
+      const t0 = performance.now();
+      const opId = `op_sup_rec_${Date.now()}`;
+      let pass = false;
+      let tenant: any = null;
+      let scan: any = null;
+
+      try {
+        tenant = await DatabaseService.resolveUserAndTenant('usr_sup_rec', 'sup_rec@test.com', 'Sup Rec Tester');
+        scan = await DatabaseService.createScan(tenant.organizationId, 'AE', tenant.userId, testBusinessProfile, testSystemProfile);
+
+        await JobQueue.registerOrGetJob(scan.scan_id, tenant.organizationId, opId, { task: 'test_recovery' });
+        // Claim lease with worker 1
+        await JobQueue.claimJobLease(opId, tenant.organizationId, 'worker_1', 1);
+
+        // Expire lease artificially in database
+        await DatabaseService.query(
+          "UPDATE job_queue SET lease_expires_at = NOW() - INTERVAL '5 seconds' WHERE operation_id = $1",
+          [opId]
+        );
+
+        // Supervisor recovers expired job
+        const recoveryResult = await JobQueue.recoverStaleAndPendingJobs('supervisor_worker_test');
+        const retrieved = await JobQueue.getJob(opId, tenant.organizationId);
+
+        pass = scorecard.definitive_score_blocked === true &&
+          recoveryResult.recoveredCount >= 1 &&
+          retrieved !== null &&
+          (retrieved.status === 'COMPLETED' || retrieved.status === 'PROCESSING') &&
+          retrieved.attempt_count >= 2;
+      } finally {
+        try {
+          await DatabaseService.query('DELETE FROM job_queue WHERE operation_id = $1', [opId]);
+          if (scan && tenant) await DatabaseService.deleteScan(scan.scan_id, tenant.organizationId);
+        } catch (_) {}
+      }
+
+      results.push({
+        testId: 'PROC-QUEUE-SUPERVISOR-RECOVERY-001',
+        category: 'SECURITY',
+        name: 'Queue Supervisor Recovery: Expired worker lease recovered and reprocessed by supervisor',
+        mappedRequirementId: 'REQ-GATE-3',
+        status: pass ? 'PASS' : 'FAIL',
+        executionTimeMs: Math.round(performance.now() - t0),
+        details: pass
+          ? 'Behavioral verification: Expired job lease detected and supervisor re-claimed and processed job.'
+          : 'Queue supervisor recovery failure.',
+      });
+    }
+
+    // PROC-QUEUE-TERMINAL-FAIL-001: Observable Terminal Failure State & Bounded Retries
+    {
+      const t0 = performance.now();
+      const opId = `op_terminal_fail_${Date.now()}`;
+      let pass = false;
+      let tenant: any = null;
+      let scan: any = null;
+
+      try {
+        tenant = await DatabaseService.resolveUserAndTenant('usr_term_fail', 'term_fail@test.com', 'Terminal Tester');
+        scan = await DatabaseService.createScan(tenant.organizationId, 'AE', tenant.userId, testBusinessProfile, testSystemProfile);
+
+        await JobQueue.registerOrGetJob(scan.scan_id, tenant.organizationId, opId, { task: 'terminal_fail' });
+
+        // Simulate reaching max attempts
+        await DatabaseService.query(
+          "UPDATE job_queue SET attempt_count = 3, max_attempts = 3, status = 'FAILED', error_message = 'Fatal error: unrecoverable payload' WHERE operation_id = $1",
+          [opId]
+        );
+
+        // Attempting to claim lease must be strictly rejected
+        const claimAfterMax = await JobQueue.claimJobLease(opId, tenant.organizationId, 'worker_fail', 60);
+
+        // Verify observable failure state in PostgreSQL
+        const terminalJob = await JobQueue.getJob(opId, tenant.organizationId);
+
+        pass = scorecard.definitive_score_blocked === true &&
+          claimAfterMax === false &&
+          terminalJob !== null &&
+          terminalJob.status === 'FAILED' &&
+          terminalJob.attempt_count === 3 &&
+          terminalJob.error_message?.includes('unrecoverable');
+      } finally {
+        try {
+          await DatabaseService.query('DELETE FROM job_queue WHERE operation_id = $1', [opId]);
+          if (scan && tenant) await DatabaseService.deleteScan(scan.scan_id, tenant.organizationId);
+        } catch (_) {}
+      }
+
+      results.push({
+        testId: 'PROC-QUEUE-TERMINAL-FAIL-001',
+        category: 'SECURITY',
+        name: 'Terminal Failure Handling: Jobs exceeding max attempts strictly locked from re-claiming',
+        mappedRequirementId: 'REQ-GATE-3',
+        status: pass ? 'PASS' : 'FAIL',
+        executionTimeMs: Math.round(performance.now() - t0),
+        details: pass
+          ? 'Behavioral verification: PostgreSQL observable terminal failure state verified and lease claim rejected.'
+          : 'Terminal failure bounded retries check failed.',
+      });
+    }
+
     } finally {
       clearTimeout(globalTimeoutHandle);
       await DatabaseService.close();

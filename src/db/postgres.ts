@@ -12,6 +12,8 @@
  */
 
 import { Pool } from 'pg';
+import fs from 'fs';
+import path from 'path';
 import {
   ScanSession,
   BusinessProfile,
@@ -123,142 +125,41 @@ export class DatabaseService {
   private static async applySchemaMigrations(): Promise<void> {
     if (!this.client) throw new Error('Database client not initialized');
 
-    const ddl = `
-      CREATE TABLE IF NOT EXISTS organizations (
-        organization_id VARCHAR(64) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        country_code VARCHAR(2) NOT NULL DEFAULT 'AE',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    // Create schema migrations tracker
+    await this.client.exec(`
+      CREATE TABLE IF NOT EXISTS _schema_migrations (
+        version VARCHAR(128) PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+    `);
 
-      CREATE TABLE IF NOT EXISTS users (
-        user_id VARCHAR(64) PRIMARY KEY,
-        email VARCHAR(255) UNIQUE NOT NULL,
-        full_name VARCHAR(255) NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    const migrationsDir = path.resolve(process.cwd(), 'supabase/migrations');
+    if (!fs.existsSync(migrationsDir)) {
+      console.warn(`[DatabaseService] Migrations directory not found at ${migrationsDir}`);
+      return;
+    }
+
+    const migrationFiles = fs
+      .readdirSync(migrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort();
+
+    for (const file of migrationFiles) {
+      const version = file.replace('.sql', '');
+      const applied = await this.client.query(
+        'SELECT version FROM _schema_migrations WHERE version = $1 LIMIT 1',
+        [version]
       );
-
-      CREATE TABLE IF NOT EXISTS organization_users (
-        id VARCHAR(64) PRIMARY KEY,
-        organization_id VARCHAR(64) NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-        user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-        role VARCHAR(32) NOT NULL DEFAULT 'ANALYST',
-        joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE (organization_id, user_id)
-      );
-
-      CREATE TABLE IF NOT EXISTS scans (
-        scan_id VARCHAR(64) PRIMARY KEY,
-        organization_id VARCHAR(64) NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-        jurisdiction VARCHAR(2) NOT NULL,
-        status VARCHAR(32) NOT NULL DEFAULT 'CREATED',
-        created_by VARCHAR(64) NOT NULL REFERENCES users(user_id),
-        business_profile JSONB NOT NULL,
-        system_profile JSONB NOT NULL,
-        rule_pack_version VARCHAR(32) NOT NULL,
-        document_name VARCHAR(255),
-        document_mime_type VARCHAR(128),
-        document_size_bytes BIGINT,
-        document_hash VARCHAR(128),
-        storage_path VARCHAR(512),
-        security_scan_result JSONB,
-        extraction_result JSONB,
-        applicable_rules JSONB,
-        validation_results JSONB,
-        scorecard JSONB,
-        findings JSONB,
-        remediation_plan JSONB,
-        error_message TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        uploaded_at TIMESTAMPTZ,
-        completed_at TIMESTAMPTZ
-      );
-
-      CREATE TABLE IF NOT EXISTS documents (
-        document_id VARCHAR(64) PRIMARY KEY,
-        organization_id VARCHAR(64) NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-        scan_id VARCHAR(64) NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
-        file_name VARCHAR(255) NOT NULL,
-        storage_path VARCHAR(512) NOT NULL,
-        file_size_bytes BIGINT NOT NULL,
-        mime_type VARCHAR(128) NOT NULL,
-        sha256_hash VARCHAR(64) NOT NULL,
-        retention_expires_at TIMESTAMPTZ NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS job_queue (
-        operation_id VARCHAR(64) PRIMARY KEY,
-        scan_id VARCHAR(64) NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
-        organization_id VARCHAR(64) NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-        status VARCHAR(32) NOT NULL DEFAULT 'QUEUED',
-        attempt_count INT NOT NULL DEFAULT 1,
-        max_attempts INT NOT NULL DEFAULT 3,
-        locked_at TIMESTAMPTZ,
-        locked_by VARCHAR(128),
-        lease_expires_at TIMESTAMPTZ,
-        next_retry_at TIMESTAMPTZ,
-        payload JSONB,
-        result JSONB,
-        error_message TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS audit_logs (
-        log_id VARCHAR(64) PRIMARY KEY,
-        organization_id VARCHAR(64) NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-        actor_id VARCHAR(128) NOT NULL,
-        action VARCHAR(64) NOT NULL,
-        resource_id VARCHAR(128) NOT NULL,
-        result VARCHAR(16) NOT NULL,
-        ip_address VARCHAR(45) NOT NULL,
-        metadata JSONB,
-        timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS consents (
-        consent_id VARCHAR(64) PRIMARY KEY,
-        organization_id VARCHAR(64) NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-        user_id VARCHAR(64) NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
-        policy_version VARCHAR(32) NOT NULL DEFAULT 'v1.0.0',
-        necessary BOOLEAN NOT NULL DEFAULT true,
-        preferences BOOLEAN NOT NULL DEFAULT false,
-        analytics BOOLEAN NOT NULL DEFAULT false,
-        marketing BOOLEAN NOT NULL DEFAULT false,
-        jurisdiction_context VARCHAR(4) NOT NULL DEFAULT 'AE',
-        timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS privacy_requests (
-        request_id VARCHAR(64) PRIMARY KEY,
-        organization_id VARCHAR(64) NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-        requester_email VARCHAR(255) NOT NULL,
-        request_type VARCHAR(32) NOT NULL,
-        status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
-        received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        completed_at TIMESTAMPTZ
-      );
-
-      CREATE TABLE IF NOT EXISTS reports (
-        report_id VARCHAR(64) PRIMARY KEY,
-        organization_id VARCHAR(64) NOT NULL REFERENCES organizations(organization_id) ON DELETE CASCADE,
-        scan_id VARCHAR(64) NOT NULL REFERENCES scans(scan_id) ON DELETE CASCADE,
-        rule_pack_version VARCHAR(32) NOT NULL,
-        storage_path VARCHAR(512) NOT NULL,
-        retention_expires_at TIMESTAMPTZ NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_scans_org ON scans(organization_id);
-      CREATE INDEX IF NOT EXISTS idx_documents_retention ON documents(retention_expires_at);
-      CREATE INDEX IF NOT EXISTS idx_audit_logs_org ON audit_logs(organization_id, timestamp DESC);
-      CREATE INDEX IF NOT EXISTS idx_job_queue_status ON job_queue(status, updated_at);
-    `;
-
-    await this.client.exec(ddl);
+      if (applied.rows.length === 0) {
+        const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+        console.log(`[DatabaseService] Applying versioned migration: ${file}`);
+        await this.client.exec(sql);
+        await this.client.query(
+          'INSERT INTO _schema_migrations (version, applied_at) VALUES ($1, NOW())',
+          [version]
+        );
+      }
+    }
   }
 
   // -------------------------------------------------------------------------

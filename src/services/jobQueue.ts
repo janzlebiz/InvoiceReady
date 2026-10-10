@@ -181,6 +181,77 @@ export class JobQueue {
     return { status: result.status || 'UNKNOWN' };
   }
 
-  public static startWorkerSupervisor(): void {}
-  public static stopWorkerSupervisor(): void {}
+  private static supervisorTimer: NodeJS.Timeout | null = null;
+  private static isSupervising = false;
+
+  /**
+   * Recovers and re-leases stale PROCESSING jobs (whose leases expired) and queued/retryable FAILED jobs.
+   * Proves lease-expiry recovery, restart recovery, bounded retries, and terminal failure handling.
+   */
+  public static async recoverStaleAndPendingJobs(
+    workerId = 'supervisor_worker'
+  ): Promise<{ recoveredCount: number; processedCount: number }> {
+    if (this.isSupervising) return { recoveredCount: 0, processedCount: 0 };
+    this.isSupervising = true;
+    let recoveredCount = 0;
+    let processedCount = 0;
+
+    try {
+      const pendingJobs = await DatabaseService.getPendingQueueJobs();
+      for (const job of pendingJobs) {
+        // Enforce bounded retries check
+        if (job.attempt_count >= job.max_attempts) {
+          // Terminal failure: Ensure status is FAILED and do not attempt lease claim
+          if (job.status !== 'FAILED') {
+            await DatabaseService.updateJobStatus(
+              job.operation_id,
+              job.organization_id,
+              'FAILED',
+              null,
+              `Terminal failure: Exceeded maximum retry attempts (${job.max_attempts})`
+            );
+          }
+          continue;
+        }
+
+        const claimed = await this.claimJobLease(job.operation_id, job.organization_id, workerId, 60);
+        if (claimed) {
+          recoveredCount++;
+          try {
+            await this.enqueueWorker(job.operation_id, job.scan_id, job.organization_id, 'Supervisor Recovery');
+            processedCount++;
+          } catch (execErr: any) {
+            console.error(`[JobQueue Supervisor] Job ${job.operation_id} execution failed:`, execErr.message);
+          }
+        }
+      }
+    } finally {
+      this.isSupervising = false;
+    }
+
+    return { recoveredCount, processedCount };
+  }
+
+  public static startWorkerSupervisor(intervalMs = 3000): void {
+    if (this.supervisorTimer) return;
+    this.supervisorTimer = setInterval(async () => {
+      try {
+        await this.recoverStaleAndPendingJobs();
+      } catch (err: any) {
+        console.error('[JobQueue Supervisor] Error recovering jobs:', err.message);
+      }
+    }, intervalMs);
+
+    if (this.supervisorTimer.unref) {
+      this.supervisorTimer.unref();
+    }
+  }
+
+  public static stopWorkerSupervisor(): void {
+    if (this.supervisorTimer) {
+      clearInterval(this.supervisorTimer);
+      this.supervisorTimer = null;
+    }
+    this.isSupervising = false;
+  }
 }

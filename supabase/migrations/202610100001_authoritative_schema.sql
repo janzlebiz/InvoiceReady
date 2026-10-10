@@ -1,15 +1,61 @@
 -- ==============================================================================
--- InvoiceReady - Authoritative Supabase Production Schema & RLS
--- Target: Supabase PostgreSQL (Compatible with GitHub + Vercel + Supabase)
--- Consolidated from migrations: 202610100001_authoritative_schema.sql and
--- 202610100002_security_and_storage.sql
+-- InvoiceReady v1.0 - Migration 0001: Authoritative Database Schema
+-- Consolidates all tables, foreign keys, views, and indexes.
+-- Target: Supabase PostgreSQL & Authoritative Engine
 -- ==============================================================================
 
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+DO $$ BEGIN
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+DO $$ BEGIN
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
 
+-- Ensure roles exist for Supabase RLS compatibility
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+        CREATE ROLE authenticated;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        CREATE ROLE anon;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+        CREATE ROLE service_role;
+    END IF;
+END $$;
+
+-- Ensure auth and storage schemas exist for compatibility
 CREATE SCHEMA IF NOT EXISTS auth;
 CREATE SCHEMA IF NOT EXISTS storage;
+
+-- Ensure auth.uid() and storage.foldername helper functions exist
+CREATE OR REPLACE FUNCTION auth.uid()
+RETURNS TEXT AS $$
+  SELECT current_setting('request.jwt.claim.sub', true);
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION storage.foldername(name TEXT)
+RETURNS TEXT[] AS $$
+  SELECT string_to_array(name, '/');
+$$ LANGUAGE sql IMMUTABLE;
+
+CREATE TABLE IF NOT EXISTS storage.buckets (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  public BOOLEAN DEFAULT false
+);
+
+CREATE TABLE IF NOT EXISTS storage.objects (
+  id VARCHAR(64) PRIMARY KEY,
+  bucket_id TEXT REFERENCES storage.buckets(id),
+  name TEXT,
+  owner VARCHAR(64),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  metadata JSONB
+);
 
 -- 1. Organizations Table (Multi-Tenant Scoping)
 CREATE TABLE IF NOT EXISTS public.organizations (
@@ -21,7 +67,7 @@ CREATE TABLE IF NOT EXISTS public.organizations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 2. User Profiles
+-- 2. Profiles Table (Mirrors auth.users and maps user identities)
 CREATE TABLE IF NOT EXISTS public.profiles (
     id VARCHAR(64) PRIMARY KEY,
     user_id VARCHAR(64),
@@ -44,7 +90,7 @@ CREATE TABLE IF NOT EXISTS public.organization_users (
     UNIQUE(organization_id, user_id)
 );
 
--- 4. Business Assessment Profiles
+-- 4. Business Profiles
 CREATE TABLE IF NOT EXISTS public.business_profiles (
     profile_id VARCHAR(64) PRIMARY KEY,
     organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id) ON DELETE CASCADE,
@@ -63,7 +109,7 @@ CREATE TABLE IF NOT EXISTS public.business_profiles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 5. System Assessment Profiles
+-- 5. System Profiles
 CREATE TABLE IF NOT EXISTS public.system_profiles (
     profile_id VARCHAR(64) PRIMARY KEY,
     organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id) ON DELETE CASCADE,
@@ -85,7 +131,7 @@ CREATE TABLE IF NOT EXISTS public.system_profiles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 6. Authoritative Scan Sessions
+-- 6. Authoritative Scan Sessions Table
 CREATE TABLE IF NOT EXISTS public.scan_sessions (
     session_id VARCHAR(64) PRIMARY KEY,
     scan_id VARCHAR(64),
@@ -123,7 +169,7 @@ CREATE TABLE IF NOT EXISTS public.scan_sessions (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 7. Scan Documents
+-- 7. Scan Documents Table
 CREATE TABLE IF NOT EXISTS public.scan_documents (
     document_id VARCHAR(64) PRIMARY KEY,
     organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id) ON DELETE CASCADE,
@@ -139,7 +185,7 @@ CREATE TABLE IF NOT EXISTS public.scan_documents (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 8. Scan Reports
+-- 8. Scan Reports Table
 CREATE TABLE IF NOT EXISTS public.scan_reports (
     report_id VARCHAR(64) PRIMARY KEY,
     organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id) ON DELETE CASCADE,
@@ -151,7 +197,7 @@ CREATE TABLE IF NOT EXISTS public.scan_reports (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 9. Findings
+-- 9. Findings Table
 CREATE TABLE IF NOT EXISTS public.findings (
     finding_id VARCHAR(64) PRIMARY KEY,
     session_id VARCHAR(64) NOT NULL REFERENCES public.scan_sessions(session_id) ON DELETE CASCADE,
@@ -168,7 +214,7 @@ CREATE TABLE IF NOT EXISTS public.findings (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 10. Remediations
+-- 10. Remediations Table
 CREATE TABLE IF NOT EXISTS public.remediations (
     remediation_id VARCHAR(64) PRIMARY KEY,
     session_id VARCHAR(64) NOT NULL REFERENCES public.scan_sessions(session_id) ON DELETE CASCADE,
@@ -183,7 +229,7 @@ CREATE TABLE IF NOT EXISTS public.remediations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 11. Durable Job Queue
+-- 11. Durable Job Queue Table
 CREATE TABLE IF NOT EXISTS public.job_queue (
     operation_id VARCHAR(64) PRIMARY KEY,
     scan_id VARCHAR(64) NOT NULL REFERENCES public.scan_sessions(session_id) ON DELETE CASCADE,
@@ -202,7 +248,7 @@ CREATE TABLE IF NOT EXISTS public.job_queue (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 12. Audit Logs
+-- 12. Audit Logs Table
 CREATE TABLE IF NOT EXISTS public.audit_logs (
     log_id VARCHAR(64) PRIMARY KEY,
     organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id) ON DELETE CASCADE,
@@ -219,7 +265,7 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 13. Privacy Consents
+-- 13. Privacy Consents Table
 CREATE TABLE IF NOT EXISTS public.privacy_consents (
     consent_id VARCHAR(64) PRIMARY KEY,
     organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id) ON DELETE CASCADE,
@@ -236,7 +282,7 @@ CREATE TABLE IF NOT EXISTS public.privacy_consents (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 14. Privacy Requests
+-- 14. Privacy Requests Table
 CREATE TABLE IF NOT EXISTS public.privacy_requests (
     request_id VARCHAR(64) PRIMARY KEY,
     organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id) ON DELETE CASCADE,
@@ -249,7 +295,7 @@ CREATE TABLE IF NOT EXISTS public.privacy_requests (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 15. Compatibility Views
+-- 15. Backward-Compatible Compatibility Views
 CREATE OR REPLACE VIEW public.users AS
     SELECT id AS user_id, email, full_name, role, default_organization_id, created_at, updated_at
     FROM public.profiles;
@@ -279,7 +325,7 @@ CREATE OR REPLACE VIEW public.consents AS
            analytics, marketing, jurisdiction_context, timestamp, created_at
     FROM public.privacy_consents;
 
--- 16. Indexes
+-- 16. Performance Indexes
 CREATE INDEX IF NOT EXISTS idx_scan_sessions_org ON public.scan_sessions(organization_id);
 CREATE INDEX IF NOT EXISTS idx_scan_documents_retention ON public.scan_documents(retention_expires_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_org_time ON public.audit_logs(organization_id, timestamp DESC);

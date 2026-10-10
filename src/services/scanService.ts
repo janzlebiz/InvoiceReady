@@ -37,66 +37,10 @@ export class ScanService {
    * Loads an authoritative scan session from PostgreSQL.
    */
   public static async getScan(scanId: string, organizationId?: string): Promise<ScanSession | null> {
-    if (organizationId) {
-      try {
-        const dbScan = await DatabaseService.getScan(scanId, organizationId);
-        if (dbScan) return dbScan;
-      } catch (_) {}
+    if (!organizationId) {
+      throw new Error('organizationId is required to retrieve scan session');
     }
-
-    if (!isSupabaseConfigured()) {
-      return null;
-    }
-
-    const supabase = getSupabaseAdmin() || getSupabase();
-    if (!supabase) return null;
-
-    let query = supabase
-      .from('scan_sessions')
-      .select('*')
-      .eq('session_id', scanId);
-
-    if (organizationId) {
-      query = query.eq('organization_id', organizationId);
-    }
-
-    const { data, error } = await query.single();
-    if (error || !data) return null;
-
-    let bp: BusinessProfile = {
-      id: `bp_${data.session_id}`,
-      organization_id: data.organization_id,
-      country: data.jurisdiction,
-      business_name: '',
-      tax_identifier: '',
-      vat_registered: true,
-      revenue_band: 'BELOW_50M_AED',
-      transaction_types: ['B2B'],
-      branch_count: 1,
-      created_at: data.created_at,
-      updated_at: data.updated_at,
-    };
-
-    let sp: SystemProfile = {
-      id: `sys_${data.session_id}`,
-      organization_id: data.organization_id,
-      accounting_system: 'CUSTOM_ERP',
-      invoicing_system: 'CUSTOM_ERP',
-      current_invoice_format: 'PDF',
-      structured_export_capability: false,
-      electronic_transmission_capability: false,
-      number_of_invoice_templates: 1,
-    };
-
-    return {
-      scan_id: data.session_id,
-      organization_id: data.organization_id,
-      jurisdiction: data.jurisdiction,
-      rule_pack_version: '2026.1-GA',
-      business_profile: bp,
-      system_profile: sp,
-      status: data.status || 'CREATED',
-    };
+    return DatabaseService.getScan(scanId, organizationId);
   }
 
   /**

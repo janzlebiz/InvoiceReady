@@ -256,38 +256,90 @@ export async function deletePhysicalFile(path: string): Promise<{ success: boole
   if (!supabase) {
     throw new Error('Supabase client not initialized for physical deletion.');
   }
-  
-  // SEC-005: Authoritative physical deletion.
+
+  // SEC-005 & REQ-4: Authoritative physical deletion across private buckets
   const buckets: Array<'invoices' | 'reports' | 'quarantine'> = ['invoices', 'reports', 'quarantine'];
-  
-  const results = await Promise.all(
+
+  const removeResults = await Promise.all(
     buckets.map(async (bucket) => {
       const { data, error } = await supabase.storage.from(bucket).remove([path]);
       return { bucket, data, error };
     })
   );
-  
-  const errors = results.filter(r => r.error).map(r => `${r.bucket}: ${r.error!.message}`);
-  
-  // SEC-005: Rigorous authoritative verification.
-  // We attempt to download the file from each bucket to confirm it's actually gone.
-  const verifyResults = await Promise.all(
-    buckets.map(async (bucket) => {
-      const { data, error } = await supabase.storage.from(bucket).download(path);
-      // If we get data, it means deletion failed or is not yet propagated.
-      // Note: "Object not found" error is what we WANT here.
-      if (data) return { bucket, exists: true };
-      return { bucket, exists: false };
-    })
-  );
 
-  const stillExists = verifyResults.filter(v => v.exists).map(v => v.bucket);
-  if (stillExists.length > 0) {
-    errors.push(`Verification failed: Object still readable in buckets: ${stillExists.join(', ')}`);
+  const errors: string[] = [];
+  for (const r of removeResults) {
+    if (r.error) {
+      errors.push(`Remove error in bucket ${r.bucket}: ${r.error.message}`);
+    }
   }
 
-  return { 
+  // Authoritative Deletion Verification with bounded retries:
+  // ONLY accept explicit authoritative NOT-FOUND responses (404 / NoSuchKey / Object not found).
+  // Network errors, timeouts, authorization errors, and ambiguous responses MUST fail verification!
+  const maxRetries = 3;
+  for (const bucket of buckets) {
+    let verifiedNotFound = false;
+    let failureDetail: string | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const { data, error } = await supabase.storage.from(bucket).download(path);
+        if (data) {
+          // Object still exists physically
+          failureDetail = `Object still physically readable in bucket '${bucket}' after removal (attempt ${attempt}/${maxRetries})`;
+          if (attempt < maxRetries) {
+            await new Promise((r) => setTimeout(r, 150 * attempt));
+            continue;
+          }
+          break;
+        }
+
+        if (error) {
+          const msg = (error.message || '').toLowerCase();
+          const status = (error as any).status || (error as any).statusCode;
+          const isExplicitNotFound =
+            status === 404 ||
+            msg.includes('not found') ||
+            msg.includes('nosuchkey') ||
+            msg.includes('does not exist');
+
+          if (isExplicitNotFound) {
+            // Explicit authoritative NOT-FOUND verified!
+            verifiedNotFound = true;
+            break;
+          } else {
+            // Ambiguous response, network error, or authorization error — NOT proof of deletion!
+            failureDetail = `Ambiguous error during deletion verification in bucket '${bucket}': ${error.message} (status: ${status || 'unknown'})`;
+            if (attempt < maxRetries) {
+              await new Promise((r) => setTimeout(r, 150 * attempt));
+              continue;
+            }
+          }
+        } else {
+          failureDetail = `Ambiguous empty response in bucket '${bucket}': neither data nor error returned`;
+        }
+      } catch (err: any) {
+        const msg = (err?.message || '').toLowerCase();
+        if (msg.includes('not found') || msg.includes('nosuchkey') || msg.includes('404')) {
+          verifiedNotFound = true;
+          break;
+        }
+        failureDetail = `Network or exception during deletion verification in bucket '${bucket}': ${err.message}`;
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, 150 * attempt));
+          continue;
+        }
+      }
+    }
+
+    if (!verifiedNotFound) {
+      errors.push(failureDetail || `Deletion verification failure in bucket '${bucket}'`);
+    }
+  }
+
+  return {
     success: errors.length === 0,
-    errors: errors.length > 0 ? errors : undefined
+    errors: errors.length > 0 ? errors : undefined,
   };
 }
