@@ -9,19 +9,19 @@ export async function GET(
   try {
     const auth = await verifyServerAuth(req);
     const { scanId } = await params;
-    const scan = await ScanService.getScan(scanId);
+    const scan = await ScanService.getScan(scanId, auth.organizationId);
 
     if (!scan) {
-      return NextResponse.json({ error: 'Scan session not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Scan session not found or does not belong to authorized organization' }, { status: 404 });
     }
 
-    if (scan.organization_id && scan.organization_id !== auth.organizationId) {
+    if (scan.organization_id !== auth.organizationId) {
       return NextResponse.json({ error: 'Forbidden: Cross-tenant resource access denied' }, { status: 403 });
     }
 
     return NextResponse.json(scan);
   } catch (err: any) {
-    const status = err.message.includes('Unauthorized') ? 401 : 500;
+    const status = err.message?.includes('Unauthorized') ? 401 : err.message?.includes('Forbidden') ? 403 : 500;
     return NextResponse.json({ error: err.message || 'Failed to fetch scan' }, { status });
   }
 }
@@ -37,13 +37,13 @@ export async function DELETE(
     }
 
     const { scanId } = await params;
-    const scan = await ScanService.getScan(scanId);
+    const scan = await ScanService.getScan(scanId, auth.organizationId);
 
     if (!scan) {
-      return NextResponse.json({ error: 'Scan session not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Scan session not found or does not belong to authorized organization' }, { status: 404 });
     }
 
-    if (scan.organization_id && scan.organization_id !== auth.organizationId) {
+    if (scan.organization_id !== auth.organizationId) {
       return NextResponse.json({ error: 'Forbidden: Cross-tenant resource access denied' }, { status: 403 });
     }
 
@@ -52,7 +52,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true, message: 'Scan session permanently deleted' });
   } catch (err: any) {
-    const status = err.message.includes('Unauthorized') ? 401 : 500;
+    const status = err.message?.includes('Unauthorized') ? 401 : err.message?.includes('Forbidden') ? 403 : 500;
     return NextResponse.json({ error: err.message || 'Failed to delete scan' }, { status });
   }
 }

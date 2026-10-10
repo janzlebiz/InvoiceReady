@@ -19,12 +19,12 @@ export const TestSuiteModal: React.FC<TestSuiteModalProps> = ({ isOpen, onClose 
     setRunning(true);
     setErrorMsg(null);
     try {
-      const authHeader = await getClientAuthHeader().catch(() => ({ Authorization: 'Bearer dev_preview_token' }));
+      const authHeader = await getClientAuthHeader();
       const resp = await fetch('/api/tests/run', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(authHeader.Authorization ? authHeader : { Authorization: 'Bearer dev_preview_token' }),
+          ...authHeader,
         },
       });
       if (resp.ok) {

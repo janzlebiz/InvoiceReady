@@ -13,13 +13,13 @@ export async function POST(
     }
 
     const { scanId } = await params;
-    const scan = await ScanService.getScan(scanId);
+    const scan = await ScanService.getScan(scanId, auth.organizationId);
 
     if (!scan) {
-      return NextResponse.json({ error: 'Scan session not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Scan session not found or does not belong to authorized organization' }, { status: 404 });
     }
 
-    if (scan.organization_id && scan.organization_id !== auth.organizationId) {
+    if (scan.organization_id !== auth.organizationId) {
       return NextResponse.json({ error: 'Forbidden: Cross-tenant resource access denied' }, { status: 403 });
     }
 
@@ -37,7 +37,9 @@ export async function POST(
       scanId,
       buffer,
       file.name,
-      file.type || 'application/pdf'
+      file.type || 'application/pdf',
+      auth.organizationId,
+      auth.userId
     );
 
     if (!result.passed) {
@@ -49,12 +51,14 @@ export async function POST(
 
     return NextResponse.json({
       scan_id: scanId,
+      document_id: result.documentId,
       file_name: file.name,
       sha256_hash: result.sha256,
-      status: 'UPLOADED',
+      storage_path: result.storagePath,
+      status: 'SECURITY_PASSED',
     });
   } catch (err: any) {
-    const status = err.message.includes('Unauthorized') ? 401 : 500;
+    const status = err.message?.includes('Unauthorized') ? 401 : err.message?.includes('Forbidden') ? 403 : 500;
     return NextResponse.json({ error: err.message || 'Failed to upload document' }, { status });
   }
 }

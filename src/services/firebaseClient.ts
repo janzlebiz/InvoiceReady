@@ -39,8 +39,6 @@ export async function getClientAuthToken(): Promise<string> {
           const cred = await signInAnonymously(clientAuth);
           return await cred.user.getIdToken();
         } catch (err: any) {
-          // If Firebase anonymous sign-in is restricted in this environment,
-          // retrieve dev session token from the server
           try {
             const resp = await fetch('/api/auth/token', {
               method: 'POST',
@@ -56,8 +54,7 @@ export async function getClientAuthToken(): Promise<string> {
               if (data.token) return data.token;
             }
           } catch (_) {}
-
-          return 'dev_preview_token';
+          throw new Error('Authentication failed: Unable to obtain valid Firebase ID token.');
         } finally {
           cachedTokenPromise = null;
         }

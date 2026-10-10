@@ -44,7 +44,7 @@ export const App: React.FC = () => {
 
   const [businessProfile, setBusinessProfile] = useState<BusinessProfile>({
     id: `bp_${Date.now().toString(36)}`,
-    organization_id: 'org_main',
+    organization_id: profile?.defaultOrganizationId || '',
     country: 'AE',
     business_name: '',
     trade_name: '',
@@ -59,7 +59,7 @@ export const App: React.FC = () => {
 
   const [systemProfile, setSystemProfile] = useState<SystemProfile>({
     id: `sys_${Date.now().toString(36)}`,
-    organization_id: 'org_main',
+    organization_id: profile?.defaultOrganizationId || '',
     accounting_system: 'CUSTOM_ERP',
     invoicing_system: 'CUSTOM_ERP',
     current_invoice_format: 'PDF',
@@ -129,10 +129,12 @@ export const App: React.FC = () => {
         jurisdiction: selectedJurisdiction,
         business_profile: {
           ...businessProfile,
-          business_name: businessProfile.business_name || 'Assessed Organization LLC',
-          tax_identifier: businessProfile.tax_identifier || (selectedJurisdiction === 'AE' ? '100456789012345' : '123-456-789-00000'),
+          organization_id: profile?.defaultOrganizationId || '',
         },
-        system_profile: systemProfile,
+        system_profile: {
+          ...systemProfile,
+          organization_id: profile?.defaultOrganizationId || '',
+        },
       }),
     });
 

@@ -227,76 +227,144 @@ CREATE POLICY "Users can update organizations they are ADMIN/OWNER of"
   );
 
 -- Assessment & Scan Policies
-CREATE POLICY "Users can view scan sessions in their orgs or created by them"
+-- Assessment & Scan Policies (Strict Tenant Isolation)
+CREATE POLICY "Users can view scan sessions in their orgs"
   ON public.scan_sessions FOR SELECT
-  USING (auth.uid() = user_id OR public.user_belongs_to_org(organization_id) OR user_id IS NULL);
+  TO authenticated
+  USING (public.user_belongs_to_org(organization_id));
 
-CREATE POLICY "Authenticated users can create scan sessions"
+CREATE POLICY "Analysts and owners can create scan sessions in their org"
   ON public.scan_sessions FOR INSERT
-  WITH CHECK (auth.uid() = user_id OR auth.uid() IS NOT NULL);
+  TO authenticated
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.organization_users
+      WHERE organization_id = scan_sessions.organization_id
+        AND user_id = auth.uid()
+        AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    )
+  );
 
-CREATE POLICY "Users can update their scan sessions"
+CREATE POLICY "Analysts and owners can update scan sessions in their org"
   ON public.scan_sessions FOR UPDATE
-  USING (auth.uid() = user_id OR public.user_belongs_to_org(organization_id));
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.organization_users
+      WHERE organization_id = scan_sessions.organization_id
+        AND user_id = auth.uid()
+        AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    )
+  );
 
-CREATE POLICY "Users can delete their scan sessions"
+CREATE POLICY "Admins and owners can delete scan sessions in their org"
   ON public.scan_sessions FOR DELETE
-  USING (auth.uid() = user_id OR public.user_belongs_to_org(organization_id));
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.organization_users
+      WHERE organization_id = scan_sessions.organization_id
+        AND user_id = auth.uid()
+        AND role IN ('ADMIN', 'OWNER')
+    )
+  );
 
--- Findings Policies
+-- Findings Policies (Tenant-Scoped)
 CREATE POLICY "Users can view findings for their scan sessions"
   ON public.findings FOR SELECT
-  USING (
+  TO authenticated
+  USING (public.user_belongs_to_org(organization_id));
+
+CREATE POLICY "Analysts and owners can insert findings"
+  ON public.findings FOR INSERT
+  TO authenticated
+  WITH CHECK (
     EXISTS (
-      SELECT 1 FROM public.scan_sessions s
-      WHERE s.session_id = findings.session_id
-        AND (s.user_id = auth.uid() OR public.user_belongs_to_org(s.organization_id) OR s.user_id IS NULL)
+      SELECT 1 FROM public.organization_users
+      WHERE organization_id = findings.organization_id
+        AND user_id = auth.uid()
+        AND role IN ('ANALYST', 'ADMIN', 'OWNER')
     )
   );
 
-CREATE POLICY "Users can insert findings"
-  ON public.findings FOR INSERT
-  WITH CHECK (true);
-
--- Remediations Policies
+-- Remediations Policies (Tenant-Scoped)
 CREATE POLICY "Users can view remediations for their scan sessions"
   ON public.remediations FOR SELECT
-  USING (
+  TO authenticated
+  USING (public.user_belongs_to_org(organization_id));
+
+CREATE POLICY "Analysts and owners can insert remediations"
+  ON public.remediations FOR INSERT
+  TO authenticated
+  WITH CHECK (
     EXISTS (
-      SELECT 1 FROM public.scan_sessions s
-      WHERE s.session_id = remediations.session_id
-        AND (s.user_id = auth.uid() OR public.user_belongs_to_org(s.organization_id) OR s.user_id IS NULL)
+      SELECT 1 FROM public.organization_users
+      WHERE organization_id = remediations.organization_id
+        AND user_id = auth.uid()
+        AND role IN ('ANALYST', 'ADMIN', 'OWNER')
     )
   );
 
-CREATE POLICY "Users can insert remediations"
-  ON public.remediations FOR INSERT
-  WITH CHECK (true);
-
--- Business & System Profiles Policies
-CREATE POLICY "Users can view their business profiles"
+-- Business & System Profiles Policies (Tenant-Scoped)
+CREATE POLICY "Users can view their organization business profiles"
   ON public.business_profiles FOR SELECT
-  USING (auth.uid() = user_id OR public.user_belongs_to_org(organization_id) OR user_id IS NULL);
+  TO authenticated
+  USING (public.user_belongs_to_org(organization_id));
 
-CREATE POLICY "Users can manage their business profiles"
+CREATE POLICY "Analysts and owners can manage business profiles"
   ON public.business_profiles FOR ALL
-  USING (auth.uid() = user_id OR public.user_belongs_to_org(organization_id) OR user_id IS NULL);
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.organization_users
+      WHERE organization_id = business_profiles.organization_id
+        AND user_id = auth.uid()
+        AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.organization_users
+      WHERE organization_id = business_profiles.organization_id
+        AND user_id = auth.uid()
+        AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    )
+  );
 
-CREATE POLICY "Users can view their system profiles"
+CREATE POLICY "Users can view their organization system profiles"
   ON public.system_profiles FOR SELECT
-  USING (auth.uid() = user_id OR public.user_belongs_to_org(organization_id) OR user_id IS NULL);
+  TO authenticated
+  USING (public.user_belongs_to_org(organization_id));
 
-CREATE POLICY "Users can manage their system profiles"
+CREATE POLICY "Analysts and owners can manage system profiles"
   ON public.system_profiles FOR ALL
-  USING (auth.uid() = user_id OR public.user_belongs_to_org(organization_id) OR user_id IS NULL);
+  TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.organization_users
+      WHERE organization_id = system_profiles.organization_id
+        AND user_id = auth.uid()
+        AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.organization_users
+      WHERE organization_id = system_profiles.organization_id
+        AND user_id = auth.uid()
+        AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    )
+  );
 
--- Audit Logs Policies
-CREATE POLICY "Users can insert audit logs"
+-- Audit Logs Policies (Append-Only Tenant-Scoped)
+CREATE POLICY "Tenant members can insert audit logs"
   ON public.audit_logs FOR INSERT
-  WITH CHECK (true);
+  TO authenticated
+  WITH CHECK (public.user_belongs_to_org(organization_id));
 
 CREATE POLICY "Admins can view audit logs"
   ON public.audit_logs FOR SELECT
+  TO authenticated
   USING (
     EXISTS (
       SELECT 1 FROM public.organization_users
@@ -307,33 +375,49 @@ CREATE POLICY "Admins can view audit logs"
   );
 
 -- ------------------------------------------------------------------------------
--- 11. Supabase Storage Buckets Setup
+-- 11. Supabase Storage Buckets Setup & Restrictive Policies
 -- ------------------------------------------------------------------------------
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('invoices', 'invoices', false)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET public = false;
 
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('reports', 'reports', false)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET public = false;
 
--- Storage RLS: allow authenticated users to upload and download their own files
-CREATE POLICY "Authenticated users can upload invoices"
-  ON storage.objects FOR INSERT
-  TO authenticated
-  WITH CHECK (bucket_id = 'invoices');
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('quarantine', 'quarantine', false)
+ON CONFLICT (id) DO UPDATE SET public = false;
 
-CREATE POLICY "Authenticated users can download invoices"
+-- Storage RLS: Restrictive tenant-scoped access by path prefix (<org_id>/<scan_id>/<object_id>)
+CREATE POLICY "Tenant scoped read on storage objects"
   ON storage.objects FOR SELECT
   TO authenticated
-  USING (bucket_id = 'invoices');
+  USING (
+    bucket_id IN ('quarantine', 'invoices', 'reports')
+    AND (storage.foldername(name))[1] IN (
+      SELECT organization_id::text FROM public.organization_users WHERE user_id = auth.uid()
+    )
+  );
 
-CREATE POLICY "Authenticated users can upload reports"
+CREATE POLICY "Tenant analysts and owners can upload storage objects"
   ON storage.objects FOR INSERT
   TO authenticated
-  WITH CHECK (bucket_id = 'reports');
+  WITH CHECK (
+    bucket_id IN ('quarantine', 'invoices', 'reports')
+    AND (storage.foldername(name))[1] IN (
+      SELECT organization_id::text FROM public.organization_users
+      WHERE user_id = auth.uid() AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    )
+  );
 
-CREATE POLICY "Authenticated users can download reports"
-  ON storage.objects FOR SELECT
+CREATE POLICY "Tenant admins and owners can delete storage objects"
+  ON storage.objects FOR DELETE
   TO authenticated
-  USING (bucket_id = 'reports');
+  USING (
+    bucket_id IN ('quarantine', 'invoices', 'reports')
+    AND (storage.foldername(name))[1] IN (
+      SELECT organization_id::text FROM public.organization_users
+      WHERE user_id = auth.uid() AND role IN ('ADMIN', 'OWNER')
+    )
+  );

@@ -4,13 +4,9 @@ import { verifyServerAuth } from '@/src/auth/serverAuth';
 
 export async function POST(req: NextRequest) {
   try {
-    try {
-      await verifyServerAuth(req);
-    } catch (e: any) {
-      const authHeader = req.headers.get('authorization');
-      if (!authHeader || !authHeader.includes('dev_preview_token')) {
-        throw e;
-      }
+    const auth = await verifyServerAuth(req);
+    if (!['ADMIN', 'OWNER'].includes(auth.role)) {
+      return NextResponse.json({ error: 'Forbidden: Insufficient role permissions for test execution' }, { status: 403 });
     }
 
     const outcome = await TestRunner.runBehavioralTestSuite();

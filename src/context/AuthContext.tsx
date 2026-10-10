@@ -87,30 +87,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .eq('id', userId)
         .single();
 
-      if (data && !error) {
+      if (data && !error && data.role) {
         setProfile({
           id: data.id,
           email: data.email,
           fullName: data.full_name || '',
-          role: data.role || 'ANALYST',
+          role: data.role,
           defaultOrganizationId: data.default_organization_id,
         });
       } else {
-        // Fallback profile if row is being created by trigger
-        setProfile({
-          id: userId,
-          email,
-          fullName: user?.user_metadata?.full_name || '',
-          role: 'OWNER',
-        });
+        setProfile(null);
       }
     } catch (_) {
-      setProfile({
-        id: userId,
-        email,
-        fullName: '',
-        role: 'OWNER',
-      });
+      setProfile(null);
     } finally {
       setLoading(false);
     }

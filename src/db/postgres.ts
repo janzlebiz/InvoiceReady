@@ -382,6 +382,18 @@ export class DatabaseService {
     };
   }
 
+  public static async updateUserRole(
+    userId: string,
+    organizationId: string,
+    role: 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER'
+  ): Promise<void> {
+    await this.initialize();
+    await this.client!.query(
+      `UPDATE organization_users SET role = $1 WHERE user_id = $2 AND organization_id = $3`,
+      [role, userId, organizationId]
+    );
+  }
+
   // -------------------------------------------------------------------------
   // 2. SCANS & OBJECT-LEVEL TENANT AUTHORIZATION (Requirements 4 & 5)
   // -------------------------------------------------------------------------

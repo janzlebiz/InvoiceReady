@@ -103,9 +103,20 @@ export async function uploadReportToSupabase(
 }
 
 /**
- * Retrieves an authorized download/view signed URL for a file in Supabase Storage
+ * Retrieves an authorized download/view signed URL for a file in Supabase Storage.
+ * Validates ownership before generating signed URLs (Requirement 3).
  */
-export async function getSupabaseSignedUrl(bucket: 'invoices' | 'reports' | 'quarantine', path: string): Promise<string> {
+export async function getSupabaseSignedUrl(
+  bucket: 'invoices' | 'reports' | 'quarantine',
+  path: string,
+  organizationId: string
+): Promise<string> {
+  if (!organizationId) {
+    throw new Error('Ownership verification failed: organizationId is required to generate signed URL.');
+  }
+  if (!path.startsWith(`${organizationId}/`)) {
+    throw new Error('Forbidden: Storage object does not belong to authorized organization.');
+  }
   if (!isSupabaseConfigured()) {
     throw new Error('Storage service is not configured.');
   }

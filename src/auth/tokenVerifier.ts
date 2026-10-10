@@ -118,16 +118,6 @@ export class TokenVerifier {
         } catch (_) {}
       }
 
-      if (token === 'dev_preview_token' || process.env.ALLOW_TEST_AUTH === 'true') {
-        return {
-          uid: 'usr_dev_auditor_01',
-          email: 'auditor@invoiceready.internal',
-          name: 'Lead Compliance Auditor',
-          emailVerified: true,
-          isAnonymous: false,
-        };
-      }
-
       return null;
     }
 
