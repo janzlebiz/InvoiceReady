@@ -39,26 +39,28 @@ export interface VerifiedUserClaims {
 }
 
 export class TokenVerifier {
+  private static mockUser: VerifiedUserClaims | null = null;
+
+  /**
+   * Strictly gated mock identity for behavioral integration tests.
+   * NEVER used in production.
+   */
+  public static setMockUser(user: VerifiedUserClaims | null): void {
+    if (process.env.NODE_ENV !== 'test') {
+      throw new Error('Security Violation: Mock identity restricted to test environment.');
+    }
+    this.mockUser = user;
+  }
+
   /**
    * Verifies auth token server-side via Supabase Auth
    */
   public static async verifyToken(
     token: string
   ): Promise<VerifiedUserClaims | null> {
-    if (token.startsWith('test_sb_token_')) {
-      try {
-        const payloadBase64 = token.substring('test_sb_token_'.length);
-        const claimsJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
-        const parsed = JSON.parse(claimsJson);
-        return {
-          uid: parsed.uid,
-          email: parsed.email || 'test@invoiceready.com',
-          name: parsed.name || 'Test User',
-          emailVerified: parsed.emailVerified ?? true,
-          isAnonymous: parsed.isAnonymous ?? false,
-          aud: parsed.aud,
-        };
-      } catch (_) {}
+    // Behavioral test bypass (Zero trust in production)
+    if (process.env.NODE_ENV === 'test' && this.mockUser && token === 'mock-test-token') {
+      return this.mockUser;
     }
 
     const supabase = getSupabase();
@@ -84,56 +86,6 @@ export class TokenVerifier {
     } catch (_) {
       return null;
     }
-  }
-
-  /**
-   * Generates a signed test token for isolated testing environments
-   */
-  public static createTestToken(claims: {
-    uid: string;
-    email: string;
-    aud?: string;
-    name?: string;
-    emailVerified?: boolean;
-    isAnonymous?: boolean;
-  }): string {
-    return `test_sb_token_${Buffer.from(JSON.stringify(claims)).toString('base64')}`;
-  }
-
-  public static generateTestToken(uid: string, email: string, name?: string, aud?: string): string {
-    return this.createTestToken({ uid, email, name, aud });
-  }
-
-  public static async verifyCloudSchedulerOidc(token: string): Promise<boolean> {
-    if (!token || token.trim() === '' || token.includes('malformed') || token.includes('spoofed') || token.includes('forged')) {
-      return false;
-    }
-
-    if (token.startsWith('test_sb_token_')) {
-      const claims = await this.verifyToken(token);
-      if (!claims) return false;
-
-      const saConfig = process.env.SCHEDULER_SERVICE_ACCOUNT;
-      const audConfig = process.env.SCHEDULER_AUDIENCE;
-
-      if (process.env.NODE_ENV === 'production' && (!saConfig || !audConfig)) {
-        return false;
-      }
-
-      if (audConfig) {
-        if (!claims.aud || claims.aud !== audConfig) {
-          return false;
-        }
-      }
-
-      const isSaEmail = saConfig 
-        ? claims.email === saConfig
-        : (claims.email.includes('gserviceaccount.com') || claims.email.includes('scheduler'));
-
-      return isSaEmail;
-    }
-
-    return token.startsWith('Bearer ');
   }
 
   /**

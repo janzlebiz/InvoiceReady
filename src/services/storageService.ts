@@ -40,6 +40,9 @@ export class StorageService {
     if (isSupabaseConfigured()) {
       return sbSaveToQuarantine(buffer, originalFileName, organizationId, scanId);
     } else {
+      if (process.env.NODE_ENV !== 'test') {
+        throw new Error('FAIL-CLOSED: Supabase storage required in production/non-test runtime but not configured.');
+      }
       getMemoryStorageMap().set(quarantinePath, buffer);
       return { quarantinePath, sha256Hash };
     }
@@ -57,6 +60,9 @@ export class StorageService {
     if (isSupabaseConfigured()) {
       return sbPromoteToPrivateStorage(quarantinePath, organizationId, scanId, fileName);
     } else {
+      if (process.env.NODE_ENV !== 'test') {
+        throw new Error('FAIL-CLOSED: Supabase storage required in production/non-test runtime but not configured.');
+      }
       const map = getMemoryStorageMap();
       const buf = map.get(quarantinePath);
       if (buf) {
@@ -76,6 +82,9 @@ export class StorageService {
     if (isSupabaseConfigured()) {
       return getSupabaseSignedUrl(bucket, storagePath, orgId);
     }
+    if (process.env.NODE_ENV !== 'test') {
+      throw new Error('FAIL-CLOSED: Supabase storage required in production/non-test runtime but not configured.');
+    }
     return `https://supabase-storage-mock.internal/${bucket}/${storagePath}?token=mock_signed_url`;
   }
 
@@ -87,10 +96,20 @@ export class StorageService {
     if (isSupabaseConfigured()) {
       try {
         return await sbDownloadStorageBytes(bucket, storagePath, organizationId);
-      } catch (_) {
+      } catch (err: any) {
+        const msg = (err?.message || '').toLowerCase();
+        if (msg.includes('not found') || msg.includes('nosuchkey') || msg.includes('404')) {
+          return null;
+        }
+        if (process.env.NODE_ENV !== 'test') {
+          throw new Error(`FAIL-CLOSED: Authoritative storage read failed: ${err.message}`);
+        }
         return null;
       }
     } else {
+      if (process.env.NODE_ENV !== 'test') {
+        throw new Error('FAIL-CLOSED: Supabase storage required in production/non-test runtime but not configured.');
+      }
       return getMemoryStorageMap().get(storagePath) || null;
     }
   }
@@ -102,8 +121,19 @@ export class StorageService {
 
   public static async deletePhysicalFile(storagePath: string): Promise<boolean> {
     if (isSupabaseConfigured()) {
-      return sbDeletePhysicalFile(storagePath);
+      const result = await sbDeletePhysicalFile(storagePath);
+      if (!result.success) {
+        const errDetail = result.errors?.join(', ') || 'Unknown deletion failure';
+        if (process.env.NODE_ENV !== 'test') {
+          throw new Error(`FAIL-CLOSED: Authoritative deletion failed: ${errDetail}`);
+        }
+        return false;
+      }
+      return true;
     } else {
+      if (process.env.NODE_ENV !== 'test') {
+        throw new Error('FAIL-CLOSED: Supabase storage required in production/non-test runtime but not configured.');
+      }
       const map = getMemoryStorageMap();
       const existed = map.has(storagePath);
       map.delete(storagePath);

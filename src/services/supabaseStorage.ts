@@ -251,19 +251,43 @@ export async function downloadStorageBytes(
 /**
  * Permanently deletes a physical file from Supabase Storage
  */
-export async function deletePhysicalFile(path: string): Promise<boolean> {
+export async function deletePhysicalFile(path: string): Promise<{ success: boolean; errors?: string[] }> {
   const supabase = getSupabaseAdmin() || getSupabase();
-  if (!supabase) return false;
+  if (!supabase) {
+    throw new Error('Supabase client not initialized for physical deletion.');
+  }
   
   // SEC-005: Authoritative physical deletion.
-  // To ensure zero orphan objects across tenant-scoped private buckets,
-  // we attempt removal from all relevant buckets.
   const buckets: Array<'invoices' | 'reports' | 'quarantine'> = ['invoices', 'reports', 'quarantine'];
   
   const results = await Promise.all(
-    buckets.map(bucket => supabase.storage.from(bucket).remove([path]))
+    buckets.map(async (bucket) => {
+      const { data, error } = await supabase.storage.from(bucket).remove([path]);
+      return { bucket, data, error };
+    })
   );
   
-  const anyError = results.some(r => r.error);
-  return !anyError;
+  const errors = results.filter(r => r.error).map(r => `${r.bucket}: ${r.error!.message}`);
+  
+  // SEC-005: Rigorous authoritative verification.
+  // We attempt to download the file from each bucket to confirm it's actually gone.
+  const verifyResults = await Promise.all(
+    buckets.map(async (bucket) => {
+      const { data, error } = await supabase.storage.from(bucket).download(path);
+      // If we get data, it means deletion failed or is not yet propagated.
+      // Note: "Object not found" error is what we WANT here.
+      if (data) return { bucket, exists: true };
+      return { bucket, exists: false };
+    })
+  );
+
+  const stillExists = verifyResults.filter(v => v.exists).map(v => v.bucket);
+  if (stillExists.length > 0) {
+    errors.push(`Verification failed: Object still readable in buckets: ${stillExists.join(', ')}`);
+  }
+
+  return { 
+    success: errors.length === 0,
+    errors: errors.length > 0 ? errors : undefined
+  };
 }

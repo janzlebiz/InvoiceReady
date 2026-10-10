@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ScanService } from '@/src/services/scanService';
 import { verifyServerAuth } from '@/src/auth/serverAuth';
-import { SupabaseDbService } from '@/src/services/supabaseDatabase';
+import { DatabaseService } from '@/src/db/postgres';
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,8 +36,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   try {
     const auth = await verifyServerAuth(req);
-    const limit = Number(req.nextUrl.searchParams.get('limit') || 20);
-    const scans = await SupabaseDbService.getRecentScans(auth.organizationId, limit);
+    const scans = await DatabaseService.listScansForTenant(auth.organizationId);
     return NextResponse.json(scans);
   } catch (err: any) {
     const status = err.message?.includes('Unauthorized') ? 401 : err.message?.includes('Forbidden') ? 403 : 500;

@@ -132,45 +132,43 @@ export class JobQueue {
     workerId: string,
     leaseDurationSeconds: number = 60
   ): Promise<boolean> {
-    const now = new Date().toISOString();
-    const res = await DatabaseService.query(
-      `SELECT * FROM job_queue WHERE operation_id = $1 AND organization_id = $2`,
-      [operationId, organizationId]
-    );
-    if (res.rows.length === 0) throw new Error('Job not found');
-    const row = res.rows[0];
-    if (row.status === 'PROCESSING' && row.attempt_count >= row.max_attempts) return false;
-
-    const updateRes = await DatabaseService.query(
-      `UPDATE job_queue SET status = 'PROCESSING', attempt_count = attempt_count + 1, locked_by = $1, updated_at = $2 WHERE operation_id = $3 AND organization_id = $4 AND attempt_count < max_attempts RETURNING *`,
-      [workerId, now, operationId, organizationId]
-    );
-    return (updateRes.rowCount ?? 0) > 0 || updateRes.rows.length > 0;
+    return DatabaseService.claimJobLease(operationId, organizationId, workerId, leaseDurationSeconds);
   }
-
 
   public static async enqueueWorker(
     operationId: string,
     scanId: string,
     organizationId: string,
     userFullName: string
-  ): Promise<{ dispatched: boolean; mode: string }> {
-    await this.claimJobLease(operationId, organizationId, 'worker_unit_1');
+  ): Promise<{ dispatched: boolean; mode: string; status?: string }> {
+    const leased = await this.claimJobLease(operationId, organizationId, 'worker_unit_1');
+    if (!leased) {
+      return { dispatched: false, mode: 'durable_worker', status: 'LEASE_FAILED' };
+    }
+
+    let statusUpdated = false;
     try {
       const scan = await ScanService.getScan(scanId, organizationId);
-      if (scan) {
-        await ScanService.processScan(
-          scanId,
-          organizationId,
-          scan.business_profile,
-          scan.system_profile
-        );
-        await this.updateJobStatus(operationId, organizationId, 'COMPLETED', { success: true });
+      if (!scan) {
+        throw new Error('Scan not found for worker execution');
       }
+      await ScanService.processScan(
+        scanId,
+        organizationId,
+        scan.business_profile,
+        scan.system_profile
+      );
+      await this.updateJobStatus(operationId, organizationId, 'COMPLETED', { success: true });
+      statusUpdated = true;
+      return { dispatched: true, mode: 'durable_worker', status: 'COMPLETED' };
     } catch (err: any) {
-      await this.updateJobStatus(operationId, organizationId, 'FAILED', null, err.message);
+      if (!statusUpdated) {
+        try {
+          await this.updateJobStatus(operationId, organizationId, 'FAILED', null, err.message);
+        } catch (_) {}
+      }
+      return { dispatched: true, mode: 'durable_worker', status: 'FAILED' };
     }
-    return { dispatched: true, mode: 'durable_worker' };
   }
 
   public static async executeWorkerTask(
@@ -179,8 +177,8 @@ export class JobQueue {
     organizationId: string,
     workerName?: string
   ): Promise<{ status: string }> {
-    await this.enqueueWorker(operationId, scanId, organizationId, workerName || 'Worker');
-    return { status: 'COMPLETED' };
+    const result = await this.enqueueWorker(operationId, scanId, organizationId, workerName || 'Worker');
+    return { status: result.status || 'UNKNOWN' };
   }
 
   public static startWorkerSupervisor(): void {}
