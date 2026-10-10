@@ -39,21 +39,6 @@ export async function getClientAuthToken(): Promise<string> {
           const cred = await signInAnonymously(clientAuth);
           return await cred.user.getIdToken();
         } catch (err: any) {
-          try {
-            const resp = await fetch('/api/auth/token', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                uid: 'usr_preview_client',
-                email: 'preview@invoiceready.internal',
-                name: 'Preview Auditor',
-              }),
-            });
-            if (resp.ok) {
-              const data = await resp.json();
-              if (data.token) return data.token;
-            }
-          } catch (_) {}
           throw new Error('Authentication failed: Unable to obtain valid Firebase ID token.');
         } finally {
           cachedTokenPromise = null;

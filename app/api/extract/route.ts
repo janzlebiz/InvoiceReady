@@ -35,6 +35,9 @@ export async function POST(req: NextRequest) {
 
     // 2. Authoritative Document Record Verification & Tenant Ownership
     const supabase = getSupabase();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Database service is not configured.' }, { status: 500 });
+    }
     let expectedHash = scan.document_hash;
     let storagePath = scan.storage_path;
     let fileName = scan.document_name || 'invoice.pdf';
@@ -48,15 +51,22 @@ export async function POST(req: NextRequest) {
       .eq('organization_id', auth.organizationId)
       .single();
 
-    if (docRecord) {
-      expectedHash = docRecord.sha256_hash;
-      storagePath = docRecord.storage_path;
-      fileName = docRecord.file_name;
-      mimeType = docRecord.mime_type;
-    } else if (documentId !== scanId && documentId !== scan.scan_id) {
+    if (!docRecord) {
       return NextResponse.json(
         { error: 'Document record not found or not associated with this scan and organization.' },
         { status: 404 }
+      );
+    }
+
+    expectedHash = docRecord.sha256_hash;
+    storagePath = docRecord.storage_path;
+    fileName = docRecord.file_name;
+    mimeType = docRecord.mime_type;
+
+    if (!expectedHash) {
+      return NextResponse.json(
+        { error: 'Document record missing mandatory SHA-256 hash.' },
+        { status: 400 }
       );
     }
 

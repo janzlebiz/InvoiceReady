@@ -18,13 +18,7 @@ export function getSupabase(): SupabaseClient {
   if (clientInstance) return clientInstance;
 
   if (!isSupabaseConfigured()) {
-    // Provide a placeholder client for demo/offline preview mode so calls don't crash
-    const placeholderUrl = 'https://placeholder-project.supabase.co';
-    const placeholderKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.placeholder';
-    clientInstance = createClient(placeholderUrl, placeholderKey, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-    });
-    return clientInstance;
+    return null;
   }
 
   clientInstance = createClient(supabaseUrl, supabaseAnonKey, {
