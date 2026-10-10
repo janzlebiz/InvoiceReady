@@ -6,11 +6,15 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 let clientInstance: SupabaseClient | null = null;
 
 export function isSupabaseConfigured(): boolean {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   return Boolean(
-    supabaseUrl &&
-    supabaseAnonKey &&
-    !supabaseUrl.includes('your-project') &&
-    supabaseUrl.startsWith('https://')
+    url &&
+    anonKey &&
+    !url.includes('your-project') &&
+    !url.includes('placeholder') &&
+    !anonKey.includes('placeholder') &&
+    url.startsWith('https://')
   );
 }
 
@@ -30,6 +34,23 @@ export function getSupabase(): SupabaseClient {
   });
 
   return clientInstance;
+}
+
+let adminInstance: SupabaseClient | null = null;
+
+export function getSupabaseAdmin(): SupabaseClient | null {
+  if (adminInstance) return adminInstance;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceKey) return null;
+
+  adminInstance = createClient(supabaseUrl, serviceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
+  return adminInstance;
 }
 
 export const supabase = getSupabase();

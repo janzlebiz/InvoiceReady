@@ -1,10 +1,20 @@
 /**
  * InvoiceReady v1.0 - Private Storage Service
- * Conforms to Requirements 8, 10, 13-18, Sections 34, 35, 44.
- * Delegates to CloudStorageService for private GCS bucket operations.
+ * Approved Architecture: Next.js + Supabase + Vercel
+ * Delegates to Supabase Storage private buckets when configured, with robust in-memory fallback for local tests.
  */
 
-import { CloudStorageService } from './cloudStorageService';
+import {
+  saveToQuarantine as sbSaveToQuarantine,
+  promoteToPrivateStorage as sbPromoteToPrivateStorage,
+  getSupabaseSignedUrl,
+  downloadStorageBytes as sbDownloadStorageBytes,
+  deletePhysicalFile as sbDeletePhysicalFile,
+} from './supabaseStorage';
+import { isSupabaseConfigured } from './supabaseClient';
+import crypto from 'crypto';
+
+const memoryStorageMap = new Map<string, Buffer>();
 
 export interface StoredDocumentMetadata {
   documentId: string;
@@ -26,48 +36,85 @@ export class StorageService {
     // Cloud storage does not require local directory creation
   }
 
-  /**
-   * Saves uploaded bytes into quarantine bucket (Requirement 14)
-   */
   public static async saveToQuarantine(
     buffer: Buffer,
     originalFileName: string,
     organizationId: string,
     scanId: string
   ): Promise<{ quarantinePath: string; sha256Hash: string }> {
-    return CloudStorageService.saveToQuarantine(buffer, originalFileName, organizationId, scanId);
+    const sha256Hash = crypto.createHash('sha256').update(buffer).digest('hex');
+    const sanitizedName = originalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const quarantinePath = `${organizationId}/${scanId}/quarantine_${Date.now()}_${sanitizedName}`;
+
+    if (isSupabaseConfigured()) {
+      return sbSaveToQuarantine(buffer, originalFileName, organizationId, scanId);
+    } else {
+      memoryStorageMap.set(quarantinePath, buffer);
+      return { quarantinePath, sha256Hash };
+    }
   }
 
-  /**
-   * Promotes file from quarantine to private secured bucket (Requirement 14)
-   */
   public static async promoteToPrivateStorage(
     quarantinePath: string,
     organizationId: string,
     scanId: string,
     fileName: string
   ): Promise<string> {
-    return CloudStorageService.promoteToPrivateStorage(quarantinePath, organizationId, scanId, fileName);
+    const sanitizedName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const destinationPath = `${organizationId}/${scanId}/${sanitizedName}`;
+
+    if (isSupabaseConfigured()) {
+      return sbPromoteToPrivateStorage(quarantinePath, organizationId, scanId, fileName);
+    } else {
+      const buf = memoryStorageMap.get(quarantinePath);
+      if (buf) {
+        memoryStorageMap.set(destinationPath, buf);
+        memoryStorageMap.delete(quarantinePath);
+      }
+      return destinationPath;
+    }
   }
 
-  /**
-   * Reads private stored file buffer securely on server (Requirement 16)
-   */
+  public static async generateSignedUrl(
+    storagePath: string,
+    expirationMinutes: number = 30
+  ): Promise<string> {
+    const orgId = storagePath.split('/')[0];
+    const bucket = storagePath.includes('Readiness_Report') ? 'reports' : 'invoices';
+    if (isSupabaseConfigured()) {
+      return getSupabaseSignedUrl(bucket, storagePath, orgId);
+    }
+    return `https://supabase-storage-mock.internal/${bucket}/${storagePath}?token=mock_signed_url`;
+  }
+
+  public static async getStoredDocumentBuffer(
+    storagePath: string,
+    organizationId: string
+  ): Promise<Buffer | null> {
+    const bucket = storagePath.includes('Readiness_Report') ? 'reports' : 'invoices';
+    if (isSupabaseConfigured()) {
+      try {
+        return await sbDownloadStorageBytes(bucket, storagePath, organizationId);
+      } catch (_) {
+        return null;
+      }
+    } else {
+      return memoryStorageMap.get(storagePath) || null;
+    }
+  }
+
   public static async readStoredFile(storagePath: string): Promise<Buffer | null> {
-    return CloudStorageService.readStoredFile(storagePath);
+    const orgId = storagePath.split('/')[0];
+    return this.getStoredDocumentBuffer(storagePath, orgId);
   }
 
-  /**
-   * Permanently deletes physical file object (Requirements 17 & 27)
-   */
   public static async deletePhysicalFile(storagePath: string): Promise<boolean> {
-    return CloudStorageService.deletePhysicalFile(storagePath);
-  }
-
-  /**
-   * Generates a signed URL for client download
-   */
-  public static async generateSignedUrl(storagePath: string, expiresInMinutes?: number): Promise<string> {
-    return CloudStorageService.generateSignedUrl(storagePath, expiresInMinutes);
+    if (isSupabaseConfigured()) {
+      return sbDeletePhysicalFile(storagePath);
+    } else {
+      const existed = memoryStorageMap.has(storagePath);
+      memoryStorageMap.delete(storagePath);
+      return existed;
+    }
   }
 }

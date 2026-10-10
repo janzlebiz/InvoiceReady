@@ -1,25 +1,23 @@
 /**
  * InvoiceReady v1.0 - Persistent PDF Report Generation Service
- * Conforms to Requirements 58, 59, 60, PRD-065, PRD-066.
+ * Approved Architecture: Next.js + Supabase + Vercel
  *
- * Production Hardening Guarantees:
+ * Production Guarantees:
  * 1. Generates authentic persistent PDF readiness audit reports using pdfkit.
- * 2. Saves PDF bytes to private Google Cloud Storage bucket or Supabase Storage.
- * 3. Records report metadata, statutory rule pack version, and 30-day retention in database.
+ * 2. Saves PDF bytes directly to private Supabase Storage 'reports' bucket.
+ * 3. Records report metadata, statutory rule pack version, and 30-day retention in Supabase PostgreSQL 'scan_reports'.
  * 4. Strictly disclaims certification: Non-certification diagnostic report.
- * 5. Served only through authorized endpoints or short-lived signed URLs.
+ * 5. Served only through authorized endpoints or short-lived signed URLs with tenant scoping.
  */
 
 import PDFDocument from 'pdfkit';
 import { ScanSession } from '../engine/types';
-import { DatabaseService } from '../db/postgres';
-import { CloudStorageService } from './cloudStorageService';
+import { getSupabase } from './supabaseClient';
 import crypto from 'crypto';
 
 export class PdfReportService {
   /**
-   * Generates a formal PDF compliance report and persists it to Cloud Storage and PostgreSQL.
-   * Conforms to Requirement 7: Never reports success without durable persistence.
+   * Generates a formal PDF compliance report and persists it to Supabase Storage and PostgreSQL.
    */
   public static async generateAndSaveReport(
     scan: ScanSession,
@@ -29,50 +27,62 @@ export class PdfReportService {
       throw new Error('Report generation rejected: scan session lacks mandatory organization_id.');
     }
 
+    const supabase = getSupabase();
+    if (!supabase) {
+      throw new Error('Report persistence failed: Supabase client is not configured.');
+    }
+
     const reportId = `rep_${Date.now().toString(36)}_${crypto.randomBytes(4).toString('hex')}`;
     const pdfBuffer = await this.renderPdfDocument(scan, userFullName);
 
-    // 1. Save to Cloud Storage private bucket
+    // 1. Save to private Supabase Storage 'reports' bucket with strict tenant path prefix
     const fileName = `Readiness_Report_${scan.scan_id}_${scan.jurisdiction}.pdf`;
+    const storagePath = `${scan.organization_id}/${scan.scan_id}/${fileName}`;
 
-    const quarantine = await CloudStorageService.saveToQuarantine(
-      pdfBuffer,
-      fileName,
-      scan.organization_id,
-      scan.scan_id
-    );
-    const storagePath = await CloudStorageService.promoteToPrivateStorage(
-      quarantine.quarantinePath,
-      scan.organization_id,
-      scan.scan_id,
-      fileName
-    );
+    const { error: uploadErr } = await supabase.storage
+      .from('reports')
+      .upload(storagePath, pdfBuffer, {
+        contentType: 'application/pdf',
+        upsert: true,
+      });
 
-    if (!storagePath) {
-      throw new Error('Durable report storage failed: private storage path not established.');
+    if (uploadErr) {
+      throw new Error(`Durable report storage failed in Supabase Storage: ${uploadErr.message}`);
     }
 
-    // 2. Persist report record in PostgreSQL (Requirement 59)
+    // 2. Persist report record in Supabase PostgreSQL 'scan_reports' table
     const retentionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-    await DatabaseService.saveReport({
+    const { error: insertErr } = await supabase.from('scan_reports').insert({
       report_id: reportId,
       organization_id: scan.organization_id,
-      scan_id: scan.scan_id,
+      session_id: scan.scan_id,
       rule_pack_version: scan.rule_pack_version,
       storage_path: storagePath,
       retention_expires_at: retentionExpiresAt,
+      created_at: new Date().toISOString(),
     });
 
-    // 3. Generate signed URL for authorized access (Requirement 60)
-    const downloadUrl = await CloudStorageService.generateSignedUrl(storagePath, 30);
-    if (!downloadUrl) {
-      throw new Error('Durable report generation failed: signed download URL could not be generated.');
+    if (insertErr) {
+      // Compensating cleanup of storage object
+      try {
+        await supabase.storage.from('reports').remove([storagePath]);
+      } catch (_) {}
+      throw new Error(`Durable report metadata persistence failed: ${insertErr.message}`);
+    }
+
+    // 3. Generate short-lived signed URL for authorized access
+    const { data: signedData, error: signErr } = await supabase.storage
+      .from('reports')
+      .createSignedUrl(storagePath, 1800); // 30 minutes
+
+    if (signErr || !signedData?.signedUrl) {
+      throw new Error(`Durable report generation failed: signed download URL could not be generated (${signErr?.message || 'unknown error'})`);
     }
 
     return {
       reportId,
       storagePath,
-      downloadUrl,
+      downloadUrl: signedData.signedUrl,
     };
   }
 

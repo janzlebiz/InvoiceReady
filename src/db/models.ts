@@ -23,7 +23,6 @@ export interface DbOrganization {
 
 export interface DbUser {
   user_id: string;
-  firebase_uid: string;
   email: string;
   full_name: string;
   created_at: string;

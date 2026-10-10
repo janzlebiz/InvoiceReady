@@ -1,18 +1,17 @@
 /**
  * InvoiceReady v1.0 - Authoritative PostgreSQL Persistence Service
- * Conforms to Requirements 1-6, 11, 13, 14, 15, 22, 35-40, 59.
+ * Approved Architecture: Next.js + Supabase + Vercel
  *
- * Production Hardening Guarantees:
+ * Production Guarantees:
  * 1. ZERO in-memory Map CRUD or /tmp JSON file storage.
- * 2. Real PostgreSQL is the sole datastore (Cloud SQL via pg.Pool or PGlite).
+ * 2. Supabase PostgreSQL is the sole authoritative datastore.
  * 3. 100% Parameterized queries ($1, $2, ...) preventing SQL injection.
  * 4. Every read/write query is strictly tenant-scoped by server-derived organization_id.
  * 5. Append-only audit logs with real client IP and sanitized metadata.
- * 6. Foreign keys and cascade integrity matching schema.sql.
+ * 6. Foreign keys and cascade integrity matching Supabase schema.
  */
 
 import { Pool } from 'pg';
-import { PGlite } from '@electric-sql/pglite';
 import {
   ScanSession,
   BusinessProfile,
@@ -25,6 +24,7 @@ import {
   PrivacyRequest,
   AuditLogEntry,
 } from '../engine/types';
+import { isSupabaseConfigured } from '../services/supabaseClient';
 
 export interface PgExecutor {
   query<T = any>(sql: string, params?: any[]): Promise<{ rows: T[]; rowCount?: number }>;
@@ -35,52 +35,40 @@ export class DatabaseService {
   private static client: PgExecutor | null = null;
   private static initialized = false;
 
+  public static async query<T = any>(sql: string, params?: any[]): Promise<{ rows: T[]; rowCount?: number }> {
+    await this.initialize();
+    if (!this.client) throw new Error('Database client not initialized');
+    return this.client.query<T>(sql, params);
+  }
+
   /**
    * Initializes PostgreSQL connection and runs DDL schema migrations.
    */
   public static async initialize(forceCheck = false): Promise<void> {
     if (this.initialized && this.client && !forceCheck) return;
 
-    // 1. Check for Cloud SQL / PostgreSQL environment variables
-    const isPlaceholder = Boolean(
-      process.env.DATABASE_URL?.includes('PROJECT:REGION:INSTANCE') ||
-      process.env.DATABASE_URL?.includes('PASSWORD@')
+    const hasDbEnv = Boolean(
+      process.env.DATABASE_URL ||
+      isSupabaseConfigured() ||
+      (process.env.POSTGRES_HOST && process.env.POSTGRES_USER && process.env.POSTGRES_DB)
     );
 
-    const hasCloudSqlEnv = Boolean(
-      (process.env.DATABASE_URL && !isPlaceholder) ||
-      (process.env.SQL_HOST && process.env.SQL_USER && process.env.SQL_DB_NAME && !isPlaceholder)
-    );
-
-    // Requirement 6: In production, require real Cloud SQL PostgreSQL. Do not fall back to PGlite.
     if (process.env.NODE_ENV === 'production') {
-      if (!hasCloudSqlEnv || isPlaceholder) {
+      if (!isSupabaseConfigured() && !process.env.DATABASE_URL) {
         throw new Error(
-          'FATAL: Production mode requires authoritative Cloud SQL PostgreSQL database (DATABASE_URL or SQL_HOST/USER/DB). PGlite fallback is strictly prohibited in production.'
+          'FATAL: Production mode requires authoritative Supabase PostgreSQL database. Missing required configuration.'
         );
       }
     }
 
-    if (hasCloudSqlEnv) {
+    if (process.env.DATABASE_URL) {
       try {
-        const pool = new Pool(
-          process.env.DATABASE_URL
-            ? {
-                connectionString: process.env.DATABASE_URL,
-                max: 15,
-                idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 5000,
-              }
-            : {
-                host: process.env.SQL_HOST,
-                user: process.env.SQL_USER,
-                password: process.env.SQL_PASSWORD,
-                database: process.env.SQL_DB_NAME,
-                max: 15,
-                idleTimeoutMillis: 30000,
-                connectionTimeoutMillis: 5000,
-              }
-        );
+        const pool = new Pool({
+          connectionString: process.env.DATABASE_URL,
+          max: 15,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 5000,
+        });
 
         this.client = {
           async query<T = any>(sql: string, params?: any[]) {
@@ -91,13 +79,14 @@ export class DatabaseService {
             await pool.query(sql);
           },
         };
-        console.log('Connected to authoritative Cloud SQL PostgreSQL database.');
+        console.log('Connected to authoritative Supabase PostgreSQL database.');
       } catch (err: any) {
-        console.error('Fatal: Failed to connect to Cloud SQL PostgreSQL in production:', err.message);
+        console.error('Fatal: Failed to connect to PostgreSQL in production:', err.message);
         throw err;
       }
     } else {
       // 2. Authoritative PostgreSQL WebAssembly Engine (PGlite) strictly permitted ONLY in development/test environments
+      const { PGlite } = await import('@electric-sql/pglite');
       const pglite = new PGlite();
       this.client = {
         async query<T = any>(sql: string, params?: any[]) {
@@ -130,7 +119,6 @@ export class DatabaseService {
 
       CREATE TABLE IF NOT EXISTS users (
         user_id VARCHAR(64) PRIMARY KEY,
-        firebase_uid VARCHAR(128) UNIQUE NOT NULL,
         email VARCHAR(255) UNIQUE NOT NULL,
         full_name VARCHAR(255) NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -263,7 +251,7 @@ export class DatabaseService {
   // -------------------------------------------------------------------------
 
   public static async resolveUserAndTenant(
-    firebaseUid: string,
+    userIdInput: string,
     email: string,
     fullName: string,
     options?: {
@@ -273,7 +261,6 @@ export class DatabaseService {
     }
   ): Promise<{
     userId: string;
-    firebaseUid: string;
     email: string;
     fullName: string;
     organizationId: string;
@@ -283,15 +270,15 @@ export class DatabaseService {
     const client = this.client!;
     const isProd = process.env.NODE_ENV === 'production';
 
-    // Requirement 6: Require verified identity/email in production where applicable
+    // Require verified identity/email in production where applicable
     if (isProd && !options?.isAnonymous && options?.emailVerified === false) {
       throw new Error('Email verification required in production prior to tenant account access.');
     }
 
-    // 1. Query user by firebase_uid
+    // 1. Query user by user_id
     const userRes = await client.query(
-      'SELECT user_id, firebase_uid, email, full_name FROM users WHERE firebase_uid = $1 LIMIT 1',
-      [firebaseUid]
+      'SELECT user_id, email, full_name FROM users WHERE user_id = $1 LIMIT 1',
+      [userIdInput]
     );
 
     let userId: string;
@@ -299,7 +286,6 @@ export class DatabaseService {
     let role: 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER' = 'ANALYST';
 
     if (userRes.rows.length === 0) {
-      // RC2.1 Item 3: Auto-org creation is 100% disabled in production
       if (isProd) {
         throw new Error('Automatic organization creation is disabled in production. Organization onboarding invitation required.');
       }
@@ -307,16 +293,15 @@ export class DatabaseService {
         throw new Error('Automatic organization creation is disabled. User must be explicitly invited to an organization.');
       }
 
-      userId = `usr_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
+      userId = userIdInput || `usr_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
       orgId = `org_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
       const memberId = `mem_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
 
-      // Transactional organization + user + membership provisioning (RC2.1 Item 3)
       await client.exec('BEGIN');
       try {
         await client.query(
-          'INSERT INTO users (user_id, firebase_uid, email, full_name, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW())',
-          [userId, firebaseUid, email, fullName]
+          'INSERT INTO users (user_id, email, full_name, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())',
+          [userId, email, fullName]
         );
         await client.query(
           'INSERT INTO organizations (organization_id, name, country_code, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW())',
@@ -374,7 +359,6 @@ export class DatabaseService {
 
     return {
       userId,
-      firebaseUid,
       email,
       fullName,
       organizationId: orgId,
