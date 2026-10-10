@@ -230,23 +230,59 @@ CREATE TABLE IF NOT EXISTS public.remediations (
 );
 
 -- 11. Durable Job Queue Table
-CREATE TABLE IF NOT EXISTS public.job_queue (
-    operation_id VARCHAR(64) PRIMARY KEY,
-    scan_id VARCHAR(64) NOT NULL REFERENCES public.scan_sessions(session_id) ON DELETE CASCADE,
-    organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id) ON DELETE CASCADE,
-    status VARCHAR(32) NOT NULL DEFAULT 'QUEUED',
-    attempt_count INT NOT NULL DEFAULT 0,
-    max_attempts INT NOT NULL DEFAULT 3,
-    locked_at TIMESTAMPTZ,
-    locked_by VARCHAR(128),
-    lease_expires_at TIMESTAMPTZ,
-    next_retry_at TIMESTAMPTZ,
-    payload JSONB,
-    result JSONB,
-    error_message TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
-);
+DO $$ 
+DECLARE
+    session_id_type text;
+    org_id_type text;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'job_queue') THEN
+        SELECT data_type INTO session_id_type
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'scan_sessions' AND column_name = 'session_id';
+
+        SELECT data_type INTO org_id_type
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' AND table_name = 'organizations' AND column_name = 'organization_id';
+
+        IF session_id_type = 'uuid' THEN
+            EXECUTE 'CREATE TABLE public.job_queue (
+                operation_id VARCHAR(128) PRIMARY KEY,
+                scan_id UUID NOT NULL REFERENCES public.scan_sessions(session_id) ON DELETE CASCADE,
+                organization_id UUID NOT NULL REFERENCES public.organizations(organization_id) ON DELETE CASCADE,
+                status VARCHAR(32) NOT NULL DEFAULT ''QUEUED'',
+                attempt_count INT NOT NULL DEFAULT 0,
+                max_attempts INT NOT NULL DEFAULT 3,
+                locked_at TIMESTAMPTZ,
+                locked_by VARCHAR(128),
+                lease_expires_at TIMESTAMPTZ,
+                next_retry_at TIMESTAMPTZ,
+                payload JSONB,
+                result JSONB,
+                error_message TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT timezone(''utc''::text, now()),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone(''utc''::text, now())
+            )';
+        ELSE
+            EXECUTE 'CREATE TABLE public.job_queue (
+                operation_id VARCHAR(128) PRIMARY KEY,
+                scan_id VARCHAR(64) NOT NULL REFERENCES public.scan_sessions(session_id) ON DELETE CASCADE,
+                organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id) ON DELETE CASCADE,
+                status VARCHAR(32) NOT NULL DEFAULT ''QUEUED'',
+                attempt_count INT NOT NULL DEFAULT 0,
+                max_attempts INT NOT NULL DEFAULT 3,
+                locked_at TIMESTAMPTZ,
+                locked_by VARCHAR(128),
+                lease_expires_at TIMESTAMPTZ,
+                next_retry_at TIMESTAMPTZ,
+                payload JSONB,
+                result JSONB,
+                error_message TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT timezone(''utc''::text, now()),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone(''utc''::text, now())
+            )';
+        END IF;
+    END IF;
+END $$;
 
 -- 12. Audit Logs Table
 CREATE TABLE IF NOT EXISTS public.audit_logs (

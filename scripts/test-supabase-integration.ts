@@ -140,13 +140,13 @@ async function runLiveSupabaseSuite() {
 
     // Setup Org A
     await adminClient.from('organizations').insert({ organization_id: orgAId, name: 'Tenant A Org', country_code: 'AE' });
-    await adminClient.from('profiles').update({ role: 'OWNER', default_organization_id: orgAId }).eq('id', userAResp.user.id);
-    await adminClient.from('organization_users').insert({ organization_id: orgAId, user_id: userAResp.user.id, role: 'OWNER' });
+    await adminClient.from('profiles').upsert({ id: userAResp.user.id, email: emailA, full_name: 'Auditor Tenant A', role: 'OWNER', default_organization_id: orgAId });
+    await adminClient.from('organization_users').insert({ id: crypto.randomUUID(), organization_id: orgAId, user_id: userAResp.user.id, role: 'OWNER' });
 
     // Setup Org B
     await adminClient.from('organizations').insert({ organization_id: orgBId, name: 'Tenant B Org', country_code: 'AE' });
-    await adminClient.from('profiles').update({ role: 'OWNER', default_organization_id: orgBId }).eq('id', userBResp.user.id);
-    await adminClient.from('organization_users').insert({ organization_id: orgBId, user_id: userBResp.user.id, role: 'OWNER' });
+    await adminClient.from('profiles').upsert({ id: userBResp.user.id, email: emailB, full_name: 'Auditor Tenant B', role: 'OWNER', default_organization_id: orgBId });
+    await adminClient.from('organization_users').insert({ id: crypto.randomUUID(), organization_id: orgBId, user_id: userBResp.user.id, role: 'OWNER' });
 
     // Authenticate real user clients
     const clientA = createClient(supabaseUrl, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });

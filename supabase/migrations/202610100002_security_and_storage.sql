@@ -16,35 +16,8 @@ DO $$ BEGIN
     END IF;
 END $$;
 
--- Ensure auth and storage schemas exist
-CREATE SCHEMA IF NOT EXISTS auth;
-CREATE SCHEMA IF NOT EXISTS storage;
-
-CREATE OR REPLACE FUNCTION auth.uid()
-RETURNS TEXT AS $$
-  SELECT current_setting('request.jwt.claim.sub', true);
-$$ LANGUAGE sql STABLE;
-
-CREATE OR REPLACE FUNCTION storage.foldername(name TEXT)
-RETURNS TEXT[] AS $$
-  SELECT string_to_array(name, '/');
-$$ LANGUAGE sql IMMUTABLE;
-
-CREATE TABLE IF NOT EXISTS storage.buckets (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  public BOOLEAN DEFAULT false
-);
-
-CREATE TABLE IF NOT EXISTS storage.objects (
-  id VARCHAR(64) PRIMARY KEY,
-  bucket_id TEXT REFERENCES storage.buckets(id),
-  name TEXT,
-  owner VARCHAR(64),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW(),
-  metadata JSONB
-);
+-- Supabase manages the auth and storage schemas natively.
+-- Storage schema, helper functions, buckets, and objects tables are provisioned by Supabase Storage extension.
 
 -- 1. Enable RLS on all sensitive tenant-owned tables
 ALTER TABLE IF EXISTS public.organizations ENABLE ROW LEVEL SECURITY;
@@ -69,8 +42,8 @@ ON public.organizations FOR SELECT
 TO authenticated
 USING (
   organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE user_id = auth.uid()::text
-  ) OR created_by = auth.uid()::text
+    SELECT organization_id FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
+  ) OR (created_by)::text = (auth.uid())::text
 );
 
 -- 3. Profiles Policies
@@ -78,13 +51,13 @@ DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
 CREATE POLICY "Users can view own profile"
 ON public.profiles FOR SELECT
 TO authenticated
-USING (id = auth.uid()::text);
+USING ((id)::text = (auth.uid())::text);
 
 DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 CREATE POLICY "Users can update own profile"
 ON public.profiles FOR UPDATE
 TO authenticated
-USING (id = auth.uid()::text);
+USING ((id)::text = (auth.uid())::text);
 
 -- 4. Organization Users Policies
 DROP POLICY IF EXISTS "Members can view organization memberships" ON public.organization_users;
@@ -92,9 +65,7 @@ CREATE POLICY "Members can view organization memberships"
 ON public.organization_users FOR SELECT
 TO authenticated
 USING (
-  organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE user_id = auth.uid()::text
-  )
+  (user_id)::text = (auth.uid())::text
 );
 
 -- 5. Scan Sessions Restrictive Policies
@@ -104,7 +75,7 @@ ON public.scan_sessions FOR SELECT
 TO authenticated
 USING (
   organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE user_id = auth.uid()::text
+    SELECT organization_id FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
   )
 );
 
@@ -115,7 +86,7 @@ TO authenticated
 WITH CHECK (
   organization_id IN (
     SELECT organization_id FROM public.organization_users
-    WHERE user_id = auth.uid()::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    WHERE (user_id)::text = (auth.uid())::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
   )
 );
 
@@ -126,7 +97,7 @@ TO authenticated
 USING (
   organization_id IN (
     SELECT organization_id FROM public.organization_users
-    WHERE user_id = auth.uid()::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    WHERE (user_id)::text = (auth.uid())::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
   )
 );
 
@@ -137,7 +108,7 @@ TO authenticated
 USING (
   organization_id IN (
     SELECT organization_id FROM public.organization_users
-    WHERE user_id = auth.uid()::text AND role IN ('ADMIN', 'OWNER')
+    WHERE (user_id)::text = (auth.uid())::text AND role IN ('ADMIN', 'OWNER')
   )
 );
 
@@ -148,7 +119,7 @@ ON public.scan_documents FOR SELECT
 TO authenticated
 USING (
   organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE user_id = auth.uid()::text
+    SELECT organization_id FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
   )
 );
 
@@ -159,7 +130,7 @@ TO authenticated
 WITH CHECK (
   organization_id IN (
     SELECT organization_id FROM public.organization_users
-    WHERE user_id = auth.uid()::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    WHERE (user_id)::text = (auth.uid())::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
   )
 );
 
@@ -170,7 +141,7 @@ TO authenticated
 USING (
   organization_id IN (
     SELECT organization_id FROM public.organization_users
-    WHERE user_id = auth.uid()::text AND role IN ('ADMIN', 'OWNER')
+    WHERE (user_id)::text = (auth.uid())::text AND role IN ('ADMIN', 'OWNER')
   )
 );
 
@@ -181,7 +152,7 @@ ON public.scan_reports FOR SELECT
 TO authenticated
 USING (
   organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE user_id = auth.uid()::text
+    SELECT organization_id FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
   )
 );
 
@@ -192,7 +163,7 @@ TO authenticated
 WITH CHECK (
   organization_id IN (
     SELECT organization_id FROM public.organization_users
-    WHERE user_id = auth.uid()::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    WHERE (user_id)::text = (auth.uid())::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
   )
 );
 
@@ -203,7 +174,7 @@ ON public.findings FOR SELECT
 TO authenticated
 USING (
   organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE user_id = auth.uid()::text
+    SELECT organization_id FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
   )
 );
 
@@ -213,7 +184,7 @@ ON public.remediations FOR SELECT
 TO authenticated
 USING (
   organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE user_id = auth.uid()::text
+    SELECT organization_id FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
   )
 );
 
@@ -224,7 +195,7 @@ ON public.job_queue FOR SELECT
 TO authenticated
 USING (
   organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE user_id = auth.uid()::text
+    SELECT organization_id FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
   )
 );
 
@@ -234,7 +205,7 @@ ON public.job_queue FOR ALL
 TO authenticated
 USING (
   organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE user_id = auth.uid()::text
+    SELECT organization_id FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
   )
 );
 
@@ -245,7 +216,7 @@ ON public.audit_logs FOR INSERT
 TO authenticated
 WITH CHECK (
   organization_id IN (
-    SELECT organization_id FROM public.organization_users WHERE user_id = auth.uid()::text
+    SELECT organization_id FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
   )
 );
 
@@ -256,7 +227,7 @@ TO authenticated
 USING (
   organization_id IN (
     SELECT organization_id FROM public.organization_users 
-    WHERE user_id = auth.uid()::text AND role IN ('ADMIN', 'OWNER')
+    WHERE (user_id)::text = (auth.uid())::text AND role IN ('ADMIN', 'OWNER')
   )
 );
 
@@ -275,7 +246,7 @@ TO authenticated
 USING (
   bucket_id IN ('quarantine', 'invoices', 'reports')
   AND (storage.foldername(name))[1] IN (
-    SELECT organization_id::text FROM public.organization_users WHERE user_id = auth.uid()::text
+    SELECT organization_id::text FROM public.organization_users WHERE (user_id)::text = (auth.uid())::text
   )
 );
 
@@ -287,7 +258,7 @@ WITH CHECK (
   bucket_id IN ('quarantine', 'invoices', 'reports')
   AND (storage.foldername(name))[1] IN (
     SELECT organization_id::text FROM public.organization_users 
-    WHERE user_id = auth.uid()::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    WHERE (user_id)::text = (auth.uid())::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
   )
 );
 
@@ -299,7 +270,7 @@ USING (
   bucket_id IN ('quarantine', 'invoices', 'reports')
   AND (storage.foldername(name))[1] IN (
     SELECT organization_id::text FROM public.organization_users 
-    WHERE user_id = auth.uid()::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
+    WHERE (user_id)::text = (auth.uid())::text AND role IN ('ANALYST', 'ADMIN', 'OWNER')
   )
 );
 
@@ -311,6 +282,6 @@ USING (
   bucket_id IN ('quarantine', 'invoices', 'reports')
   AND (storage.foldername(name))[1] IN (
     SELECT organization_id::text FROM public.organization_users 
-    WHERE user_id = auth.uid()::text AND role IN ('ADMIN', 'OWNER')
+    WHERE (user_id)::text = (auth.uid())::text AND role IN ('ADMIN', 'OWNER')
   )
 );
