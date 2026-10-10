@@ -35,6 +35,7 @@ export interface VerifiedUserClaims {
   name: string;
   emailVerified: boolean;
   isAnonymous: boolean;
+  aud?: string;
 }
 
 export class TokenVerifier {
@@ -55,6 +56,7 @@ export class TokenVerifier {
           name: parsed.name || 'Test User',
           emailVerified: parsed.emailVerified ?? true,
           isAnonymous: parsed.isAnonymous ?? false,
+          aud: parsed.aud,
         };
       } catch (_) {}
     }
@@ -77,6 +79,7 @@ export class TokenVerifier {
         name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
         emailVerified: Boolean(user.email_confirmed_at),
         isAnonymous: user.is_anonymous || false,
+        aud: user.aud,
       };
     } catch (_) {
       return null;
@@ -117,14 +120,15 @@ export class TokenVerifier {
         return false;
       }
 
-      if (audConfig && claims.aud && claims.aud !== audConfig) {
-        return false;
+      if (audConfig) {
+        if (!claims.aud || claims.aud !== audConfig) {
+          return false;
+        }
       }
 
-      const isSaEmail =
-        claims.email.includes('gserviceaccount.com') ||
-        claims.email.includes('scheduler') ||
-        (Boolean(saConfig) && claims.email === saConfig);
+      const isSaEmail = saConfig 
+        ? claims.email === saConfig
+        : (claims.email.includes('gserviceaccount.com') || claims.email.includes('scheduler'));
 
       return isSaEmail;
     }

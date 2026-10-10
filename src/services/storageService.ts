@@ -14,22 +14,13 @@ import {
 import { isSupabaseConfigured } from './supabaseClient';
 import crypto from 'crypto';
 
-const memoryStorageMap = new Map<string, Buffer>();
-
-export interface StoredDocumentMetadata {
-  documentId: string;
-  organizationId: string;
-  scanId: string;
-  fileName: string;
-  storagePath: string;
-  quarantinePath?: string;
-  fileSizeBytes: number;
-  mimeType: string;
-  sha256Hash: string;
-  isQuarantined: boolean;
-  retentionExpiresAt: string;
-  createdAt: string;
-}
+const getMemoryStorageMap = (): Map<string, Buffer> => {
+  const g = global as any;
+  if (!g.__memoryStorageMap) {
+    g.__memoryStorageMap = new Map<string, Buffer>();
+  }
+  return g.__memoryStorageMap;
+};
 
 export class StorageService {
   public static initializeStorageDirs(): void {
@@ -49,7 +40,7 @@ export class StorageService {
     if (isSupabaseConfigured()) {
       return sbSaveToQuarantine(buffer, originalFileName, organizationId, scanId);
     } else {
-      memoryStorageMap.set(quarantinePath, buffer);
+      getMemoryStorageMap().set(quarantinePath, buffer);
       return { quarantinePath, sha256Hash };
     }
   }
@@ -66,10 +57,11 @@ export class StorageService {
     if (isSupabaseConfigured()) {
       return sbPromoteToPrivateStorage(quarantinePath, organizationId, scanId, fileName);
     } else {
-      const buf = memoryStorageMap.get(quarantinePath);
+      const map = getMemoryStorageMap();
+      const buf = map.get(quarantinePath);
       if (buf) {
-        memoryStorageMap.set(destinationPath, buf);
-        memoryStorageMap.delete(quarantinePath);
+        map.set(destinationPath, buf);
+        map.delete(quarantinePath);
       }
       return destinationPath;
     }
@@ -99,7 +91,7 @@ export class StorageService {
         return null;
       }
     } else {
-      return memoryStorageMap.get(storagePath) || null;
+      return getMemoryStorageMap().get(storagePath) || null;
     }
   }
 
@@ -112,8 +104,9 @@ export class StorageService {
     if (isSupabaseConfigured()) {
       return sbDeletePhysicalFile(storagePath);
     } else {
-      const existed = memoryStorageMap.has(storagePath);
-      memoryStorageMap.delete(storagePath);
+      const map = getMemoryStorageMap();
+      const existed = map.has(storagePath);
+      map.delete(storagePath);
       return existed;
     }
   }

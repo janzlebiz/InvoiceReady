@@ -40,7 +40,7 @@ export async function uploadInvoiceToSupabase(
   const { error: uploadError } = await supabase.storage
     .from('invoices')
     .upload(path, file, {
-      cacheControl: '3600',
+      cacheControl: '0',
       upsert: false, // Disallow overwrite by default (SEC-005)
       contentType: (file as any).type || 'application/pdf',
     });
@@ -86,6 +86,7 @@ export async function saveToQuarantine(
     .upload(quarantinePath, buffer, {
       contentType: 'application/octet-stream',
       upsert: true,
+      cacheControl: '0',
     });
 
   if (uploadErr) {
@@ -133,6 +134,7 @@ export async function promoteToPrivateStorage(
     .upload(destinationPath, fileBuffer, {
       contentType: 'application/pdf',
       upsert: true,
+      cacheControl: '0',
     });
 
   if (upErr) {
@@ -252,9 +254,16 @@ export async function downloadStorageBytes(
 export async function deletePhysicalFile(path: string): Promise<boolean> {
   const supabase = getSupabaseAdmin() || getSupabase();
   if (!supabase) return false;
-  let bucket: 'invoices' | 'reports' | 'quarantine' = 'invoices';
-  if (path.includes('Readiness_Report')) bucket = 'reports';
-  else if (path.includes('quarantine_')) bucket = 'quarantine';
-  const { error } = await supabase.storage.from(bucket).remove([path]);
-  return !error;
+  
+  // SEC-005: Authoritative physical deletion.
+  // To ensure zero orphan objects across tenant-scoped private buckets,
+  // we attempt removal from all relevant buckets.
+  const buckets: Array<'invoices' | 'reports' | 'quarantine'> = ['invoices', 'reports', 'quarantine'];
+  
+  const results = await Promise.all(
+    buckets.map(bucket => supabase.storage.from(bucket).remove([path]))
+  );
+  
+  const anyError = results.some(r => r.error);
+  return !anyError;
 }

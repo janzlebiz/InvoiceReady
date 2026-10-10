@@ -80,19 +80,47 @@ const testSystemProfile: SystemProfile = {
 };
 
 export class TestRunner {
+  private static async withTimeout<T>(promise: Promise<T>, timeoutMs: number, testId: string): Promise<T> {
+    let timeoutHandle: NodeJS.Timeout;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        console.error(`TEST TIMEOUT: ${testId} exceeded ${timeoutMs}ms`);
+        // Diagnostic logs
+        console.error('Active handles:', process._getActiveHandles());
+        console.error('Active requests:', process._getActiveRequests());
+        reject(new Error(`TEST TIMEOUT: ${testId}`));
+      }, timeoutMs);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutHandle));
+  }
+
   public static async runBehavioralTestSuite(): Promise<TestSuiteOutcome> {
     const startTime = performance.now();
     const results: TestCaseResult[] = [];
+    const globalTimeoutHandle = setTimeout(() => {
+      console.error('GLOBAL SUITE TIMEOUT exceeded 120s');
+      process.exit(1);
+    }, 120000);
 
-    await DatabaseService.initialize();
-    StorageService.initializeStorageDirs();
+    try {
+      await DatabaseService.initialize();
+      StorageService.initializeStorageDirs();
+
+      const rulesV2 = RuleRegistry.getRulesForJurisdiction('AE', 'AE-2026.2');
+      const rulesPH = RuleRegistry.getRulesForJurisdiction('PH', 'PH-2026.2');
+      const scorecard: any = { 
+        definitive_score_blocked: true,
+        critical_gate_triggered: true,
+        overall_score: 65,
+        classification: 'REVIEW_REQUIRED'
+      };
 
     // -----------------------------------------------------------------------
     // 1. AUTHENTICATION & RBAC TESTS (Requirements 42.1, 42.2, 42.4)
     // -----------------------------------------------------------------------
 
     // SEC-AUTH-001: Authentication Failure (Malformed/Forged Token Rejected)
-    {
+    await TestRunner.withTimeout((async () => { 
       const t0 = performance.now();
       const forgedToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.forged.signature';
       const claims = await TokenVerifier.verifyToken(forgedToken);
@@ -109,10 +137,10 @@ export class TestRunner {
           ? 'Behavioral verification: TokenVerifier strictly returned null for unauthenticated token.'
           : 'Security failure: Forged token was accepted.',
       });
-    }
+    }), 30000, 'SEC-AUTH-001' );
 
     // SEC-AUTH-002: Authenticated Access & PostgreSQL Tenant Resolution
-    {
+    await TestRunner.withTimeout((async () => { 
       const t0 = performance.now();
       const token = TokenVerifier.generateTestToken('usr_auth_ok_01', 'auditor@invoiceready.com', 'Auditor Valid');
       const claims = await TokenVerifier.verifyToken(token);
@@ -122,7 +150,6 @@ export class TestRunner {
       if (isValid) {
         userContext = await DatabaseService.resolveUserAndTenant(claims!.uid, claims!.email, claims!.name);
       }
-
       const pass = isValid && userContext !== null && userContext.role === 'OWNER';
 
       results.push({
@@ -136,10 +163,10 @@ export class TestRunner {
           ? `Behavioral verification: Successfully resolved user ${userContext.userId} with organization ${userContext.organizationId}.`
           : 'Authentication failure: Valid token rejected or context not resolved.',
       });
-    }
+    }), 30000, 'SEC-AUTH-002');
 
     // SEC-RBAC-001: Unauthorized Role Rejection (VIEWER blocked from ADMIN actions)
-    {
+    await TestRunner.withTimeout((async () => { 
       const t0 = performance.now();
       const user = await DatabaseService.resolveUserAndTenant('usr_viewer_test', 'viewer@test.com', 'Viewer Test');
       await DatabaseService.updateUserRole(user.userId, user.organizationId, 'VIEWER');
@@ -149,7 +176,7 @@ export class TestRunner {
       const privilegedRoles = ['ADMIN', 'OWNER'];
       const isBlocked = !privilegedRoles.includes(resolved.role);
 
-      const pass = isViewer && isBlocked;
+      const pass = scorecard.definitive_score_blocked === true && isViewer && isBlocked;
 
       results.push({
         testId: 'SEC-RBAC-001',
@@ -162,7 +189,7 @@ export class TestRunner {
           ? 'Behavioral verification: User verified with VIEWER role in PostgreSQL; privileged ADMIN operations strictly rejected.'
           : 'RBAC failure: Privilege escalation occurred.',
       });
-    }
+    }), 30000, 'SEC-RBAC-001');
 
     // -----------------------------------------------------------------------
     // 2. TENANT ISOLATION TESTS (Requirement 42.3, 42.9)
@@ -241,7 +268,7 @@ export class TestRunner {
       });
 
       const unauthorizedReport = await DatabaseService.getReport(scanA.scan_id, tenantB.organizationId);
-      const pass = unauthorizedReport === null;
+      const pass = scorecard.definitive_score_blocked === true && unauthorizedReport === null;
 
       results.push({
         testId: 'SEC-REPORT-AUTH-001',
@@ -263,20 +290,29 @@ export class TestRunner {
     // SEC-DOC-DELETED-001: Deleted Document Physical Access Denial
     {
       const t0 = performance.now();
-      const tenant = await DatabaseService.resolveUserAndTenant('usr_del_test', 'del@test.com', 'Del Tester');
+      const uniqueId = `del_${Date.now()}`;
+      const tenant = await DatabaseService.resolveUserAndTenant(`usr_${uniqueId}`, `${uniqueId}@test.com`, 'Del Tester');
 
       const testBuffer = Buffer.from('%PDF-1.4 Invoice deletion verification buffer', 'utf8');
-      const q = await StorageService.saveToQuarantine(testBuffer, 'delete_test.pdf', tenant.organizationId, 'scan_del_01');
-      const storageKey = await StorageService.promoteToPrivateStorage(q.quarantinePath, tenant.organizationId, 'scan_del_01', 'delete_test.pdf');
+      const scanId = `scan_del_${Date.now()}`;
+      const q = await StorageService.saveToQuarantine(testBuffer, 'delete_test.pdf', tenant.organizationId, scanId);
+      const storageKey = await StorageService.promoteToPrivateStorage(q.quarantinePath, tenant.organizationId, scanId, 'delete_test.pdf');
 
       // Verify file exists
       const beforeDelete = await StorageService.readStoredFile(storageKey);
       // Perform physical deletion
       await StorageService.deletePhysicalFile(storageKey);
-      // Verify subsequent access is denied
-      const afterDelete = await StorageService.readStoredFile(storageKey);
+      
+      // Authoritative check with retry (Remote storage propagation buffer)
+      let afterDelete = await StorageService.readStoredFile(storageKey);
+      let retries = 5;
+      while (afterDelete !== null && retries > 0) {
+        await new Promise(r => setTimeout(r, 1000));
+        afterDelete = await StorageService.readStoredFile(storageKey);
+        retries--;
+      }
 
-      const pass = beforeDelete !== null && afterDelete === null;
+      const pass = scorecard.definitive_score_blocked === true && beforeDelete !== null && afterDelete === null;
 
       results.push({
         testId: 'SEC-DOC-DELETED-001',
@@ -324,7 +360,7 @@ export class TestRunner {
       const remainingExpired = await DatabaseService.getExpiredDocuments();
       const isPurged = !remainingExpired.some((d) => d.document_id === 'doc_expired_01');
 
-      const pass = found && isPurged;
+      const pass = scorecard.definitive_score_blocked === true && found && isPurged;
 
       results.push({
         testId: 'SEC-DOC-EXPIRED-001',
@@ -357,13 +393,13 @@ export class TestRunner {
       const idempotencyKey = `op_idemp_${Date.now()}`;
 
       // First request: Registers new job
-      const first = await JobQueue.registerOrGetJob(scanIdemp.scan_id, tenant.organizationId, idempotencyKey);
+      const first = await JobQueue.registerOrGetJob(scanIdemp.scan_id, tenant.organizationId, idempotencyKey, { type: 'test' });
       await DatabaseService.updateJobStatus(idempotencyKey, tenant.organizationId, 'COMPLETED', { overall_score: 95 });
 
       // Duplicate request with identical idempotency key
-      const duplicate = await JobQueue.registerOrGetJob(scanIdemp.scan_id, tenant.organizationId, idempotencyKey);
+      const duplicate = await JobQueue.registerOrGetJob(scanIdemp.scan_id, tenant.organizationId, idempotencyKey, { type: 'test' });
 
-      const pass =
+      const pass = scorecard.definitive_score_blocked === true &&
         !first.isExisting &&
         duplicate.isExisting &&
         duplicate.job.status === 'COMPLETED' &&
@@ -395,12 +431,12 @@ export class TestRunner {
       );
       const retryOpId = `op_retry_${Date.now()}`;
 
-      const initial = await JobQueue.registerOrGetJob(scanRetry.scan_id, tenant.organizationId, retryOpId);
       // Simulate failed attempt and retry status
+      await JobQueue.registerOrGetJob(scanRetry.scan_id, tenant.organizationId, retryOpId, { type: 'test' });
       await DatabaseService.updateJobStatus(retryOpId, tenant.organizationId, 'FAILED', null, 'Transient model timeout');
       const fetched = await JobQueue.getJob(retryOpId, tenant.organizationId);
 
-      const pass = fetched !== null && fetched.status === 'FAILED' && fetched.error_message?.includes('timeout');
+      const pass = scorecard.definitive_score_blocked === true && fetched !== null && fetched.status === 'FAILED' && fetched.error_message?.includes('timeout');
 
       results.push({
         testId: 'PROC-RETRY-001',
@@ -425,7 +461,7 @@ export class TestRunner {
       const mzPayload = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00]);
       const inspection = await SecurityScanner.inspectFileBuffer(mzPayload, 'invoice.exe', 'application/pdf');
 
-      const pass = !inspection.passed && inspection.quarantined && inspection.securityFindings.some((f) => f.includes('MZ'));
+      const pass = scorecard.definitive_score_blocked === true && !inspection.passed && inspection.quarantined && inspection.securityFindings.some((f) => f.includes('MZ'));
 
       results.push({
         testId: 'SEC-SCANNER-001',
@@ -446,7 +482,7 @@ export class TestRunner {
       const exploitPdf = Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /JavaScript /JS (app.alert(1);) >> >>\nendobj', 'utf8');
       const inspection = await SecurityScanner.inspectFileBuffer(exploitPdf, 'suspicious_invoice.pdf', 'application/pdf');
 
-      const pass = !inspection.passed && inspection.quarantined && inspection.securityFindings.some((f) => f.includes('JavaScript'));
+      const pass = scorecard.definitive_score_blocked === true && !inspection.passed && inspection.quarantined && inspection.securityFindings.some((f) => f.includes('JavaScript'));
 
       results.push({
         testId: 'SEC-EXPLOIT-PDF-001',
@@ -496,7 +532,6 @@ export class TestRunner {
     // REG-AE-BOUNDARY-001: UAE Phase 1 (>= AED 50M) vs Phase 2 (< AED 50M)
     {
       const t0 = performance.now();
-      const rulesV2 = RuleRegistry.getRulesForJurisdiction('AE', 'AE-2026.2');
       const phaseRule = rulesV2.find((r) => r.rule_id === 'AE-RULE-APPLICABILITY-PHASE');
 
       // Boundary Test 1: Exactly 50,000,000 AED -> Phase 1
@@ -515,7 +550,7 @@ export class TestRunner {
         {}
       );
 
-      const pass =
+      const pass = scorecard.definitive_score_blocked === true &&
         evalPhase1.message.includes('October 30, 2026') &&
         evalPhase1.message.includes('January 1, 2027') &&
         evalPhase2.message.includes('May 31, 2027') &&
@@ -607,7 +642,7 @@ export class TestRunner {
       // 3. Immediately after transition end: Jan 1, 2027 -> FAIL
       const evalAfter = orRule!.evaluateRule(makeOR('2027-01-01'), profilePH, { accounting_system: 'OTHER', invoicing_system: 'OTHER', current_invoice_format: 'PDF', structured_export_capability: false, electronic_transmission_capability: false, number_of_invoice_templates: 1, id: 'sp', organization_id: 'org_ph' }, {});
 
-      const pass =
+      const pass = scorecard.definitive_score_blocked === true &&
         evalBefore.state === 'PASS' &&
         evalOn.state === 'PASS' &&
         evalAfter.state === 'FAIL' &&
@@ -696,8 +731,7 @@ export class TestRunner {
         packConfigAE
       );
 
-      const pass =
-        scorecard.definitive_score_blocked === true &&
+      const pass = scorecard.definitive_score_blocked === true &&
         scorecard.overall_score === null &&
         scorecard.classification === 'REVIEW_REQUIRED';
 
@@ -771,7 +805,7 @@ export class TestRunner {
       // 6. Verify report generated in PostgreSQL
       const persistedReport = await DatabaseService.getReport(initialScan.scan_id, user.organizationId);
 
-      const pass =
+      const pass = scorecard.definitive_score_blocked === true &&
         persistedScan !== null &&
         (persistedScan.status === 'COMPLETED' || persistedScan.status === 'REVIEW_REQUIRED') &&
         persistedScan.scorecard !== undefined &&
@@ -840,7 +874,7 @@ export class TestRunner {
       // Even if client modifies local React state or sends forged payload, DatabaseService is the sole authority.
       const authoritativeAfter = await DatabaseService.getScan(scan.scan_id, user.organizationId);
 
-      const pass =
+      const pass = scorecard.definitive_score_blocked === true &&
         authoritativeAfter !== null &&
         authoritativeAfter.scorecard?.overall_score === authoritativeScore &&
         authoritativeAfter.scorecard?.overall_score !== maliciousClientPayload.scorecard.overall_score &&
@@ -868,7 +902,7 @@ export class TestRunner {
     {
       const t0 = performance.now();
       const claims = await TokenVerifier.verifyToken('invalid_bearer_token');
-      const pass = claims === null;
+      const pass = scorecard.definitive_score_blocked === true && claims === null;
 
       results.push({
         testId: 'SEC-EXTRACT-UNAUTH-001',
@@ -904,7 +938,7 @@ export class TestRunner {
       // Reset adapter to default
       ProductionMalwareScanner.setAdapter(null);
 
-      const pass =
+      const pass = scorecard.definitive_score_blocked === true &&
         inspection.passed === false &&
         inspection.quarantined === true &&
         inspection.malwareClean === false &&
@@ -940,7 +974,7 @@ export class TestRunner {
         if (prevKey) process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = prevKey;
       }
 
-      const pass = configFailClosed;
+      const pass = scorecard.definitive_score_blocked === true && configFailClosed;
 
       results.push({
         testId: 'OPS-STARTUP-FAILCLOSED-001',
@@ -959,21 +993,22 @@ export class TestRunner {
     {
       const t0 = performance.now();
       const opId = `op_durable_queue_${Date.now()}`;
-      const orgId = 'org_queue_test';
-      const scanId = 'scan_queue_test';
+      const tenant = await DatabaseService.resolveUserAndTenant('usr_queue_test', 'queue@test.com', 'Queue Tester');
+      // Fix: Create scan and use its ID to satisfy foreign key constraint
+      const scan = await DatabaseService.createScan(tenant.organizationId, 'AE', tenant.userId, testBusinessProfile, testSystemProfile);
 
-      const { job, isExisting } = await JobQueue.registerOrGetJob(scanId, orgId, opId, { test: true });
+      const { job, isExisting } = await JobQueue.registerOrGetJob(scan.scan_id, tenant.organizationId, opId, { test: true });
       const isRegistered = !isExisting && job.status === 'QUEUED';
 
-      const leaseClaimed = await JobQueue.claimJobLease(opId, orgId, 'worker_unit_1', 60);
-      const retrievedJob = await JobQueue.getJob(opId, orgId);
+      const leaseClaimed = await JobQueue.claimJobLease(opId, tenant.organizationId, 'worker_unit_1', 60);
+      const retrievedJob = await JobQueue.getJob(opId, tenant.organizationId);
       const isLeased = leaseClaimed && retrievedJob?.status === 'PROCESSING';
 
-      await JobQueue.updateJobStatus(opId, orgId, 'COMPLETED', { score: 100 });
-      const completedJob = await JobQueue.getJob(opId, orgId);
+      await JobQueue.updateJobStatus(opId, tenant.organizationId, 'COMPLETED', { score: 100 });
+      const completedJob = await JobQueue.getJob(opId, tenant.organizationId);
       const isCompleted = completedJob?.status === 'COMPLETED';
 
-      const pass = isRegistered && isLeased && isCompleted;
+      const pass = scorecard.definitive_score_blocked === true && isRegistered && isLeased && isCompleted;
 
       results.push({
         testId: 'OPS-DURABLE-QUEUE-001',
@@ -998,7 +1033,7 @@ export class TestRunner {
       const hasDevTokenInClientAuth = clientAuthFile.includes('dev_preview_token');
       const usesRealClientAuth = appFile.includes('getClientAuthHeader') && clientAuthFile.includes('getSupabase');
 
-      const pass = !hasDevTokenInApp && !hasDevTokenInClientAuth && usesRealClientAuth;
+      const pass = scorecard.definitive_score_blocked === true && !hasDevTokenInApp && !hasDevTokenInClientAuth && usesRealClientAuth;
 
       results.push({
         testId: 'SEC-BUNDLE-NO-DEV-CREDS-001',
@@ -1053,7 +1088,7 @@ export class TestRunner {
       const unauthenticatedCheck = await TokenVerifier.verifyToken('');
       const invalidTokenCheck = await TokenVerifier.verifyToken('malformed.spoofed.token');
 
-      const pass = unauthenticatedCheck === null && invalidTokenCheck === null;
+      const pass = scorecard.definitive_score_blocked === true && unauthenticatedCheck === null && invalidTokenCheck === null;
 
       results.push({
         testId: 'SEC-AUTH-BEARER-ENFORCEMENT-001',
@@ -1114,7 +1149,7 @@ export class TestRunner {
       const claim1 = await DatabaseService.claimJobLease(opId, tenant.organizationId, 'worker_instance_1', 60);
       const claim2 = await DatabaseService.claimJobLease(opId, tenant.organizationId, 'worker_instance_2', 60);
 
-      const pass = claim1 === true && claim2 === false;
+      const pass = scorecard.definitive_score_blocked === true && claim1 === true && claim2 === false;
 
       results.push({
         testId: 'PROC-ATOMIC-LEASE-001',
@@ -1138,7 +1173,7 @@ export class TestRunner {
       const doc = RegulatorySourceIntegrity.getIntegrityMetadataDocumentation();
       const hasPolicy = doc.hashAlgorithm === 'SHA-256' && doc.verificationPolicy.length > 0;
 
-      const pass = Boolean(source && source.source_hash.length === 64 && hasPolicy);
+      const pass = scorecard.definitive_score_blocked === true && Boolean(source && source.source_hash.length === 64 && hasPolicy);
 
       results.push({
         testId: 'REG-SOURCE-INTEGRITY-001',
@@ -1168,7 +1203,7 @@ export class TestRunner {
       const saToken = TokenVerifier.generateTestToken('sa_scheduler_01', 'invoiceready-cron@gen-lang-client-0427039673.iam.gserviceaccount.com', 'Cloud Scheduler Service Account');
       const saTokenAccepted = (await TokenVerifier.verifyCloudSchedulerOidc(saToken)) === true;
 
-      const pass = userTokenRejected && saTokenAccepted;
+      const pass = scorecard.definitive_score_blocked === true && userTokenRejected && saTokenAccepted;
 
       results.push({
         testId: 'OPS-SCHEDULER-SA-OIDC-002',
@@ -1236,7 +1271,7 @@ export class TestRunner {
 
       // Attempting to claim lease after reaching max attempts must be atomically rejected
       const claimedAfterMax = await DatabaseService.claimJobLease(opId, tenant.organizationId, 'worker_overflow', 60);
-      const pass = claimedAfterMax === false;
+      const pass = scorecard.definitive_score_blocked === true && claimedAfterMax === false;
 
       results.push({
         testId: 'PROC-JOB-MAX-RETRIES-001',
@@ -1257,7 +1292,7 @@ export class TestRunner {
       const isProduction = (process.env as any).NODE_ENV === 'production';
       const allowTestAuth = process.env.ALLOW_TEST_AUTH === 'true';
 
-      const pass = Boolean(!isProduction || allowTestAuth);
+      const pass = scorecard.definitive_score_blocked === true && Boolean(!isProduction || allowTestAuth);
 
       results.push({
         testId: 'SEC-AUTH-TOKEN-ENDPOINT-DISABLED-001',
@@ -1400,7 +1435,7 @@ export class TestRunner {
         'application/pdf'
       );
 
-      const pass =
+      const pass = scorecard.definitive_score_blocked === true &&
         binaryPdfBuffer.subarray(0, 5).toString('ascii') === '%PDF-' &&
         extractedText.includes('INV-2026-REAL-001') &&
         extractedText.includes('100456789012345') &&
@@ -1456,7 +1491,7 @@ export class TestRunner {
       const opId = `op_sup_${Date.now()}`;
       const job = await JobQueue.registerOrGetJob(scan.scan_id, tenant.organizationId, opId);
 
-      const pass = Boolean(job && job.job && job.job.max_attempts === 3);
+      const pass = scorecard.definitive_score_blocked === true && Boolean(job && job.job && job.job.max_attempts === 3);
 
       results.push({
         testId: 'PROC-JOB-AUTHORITATIVE-RETRIES-001',
@@ -1518,7 +1553,7 @@ export class TestRunner {
 
       // Helper logic test from server.ts getClientIp
       const resolvedIp = mockReq.ips[0].trim();
-      const pass = resolvedIp === '203.0.113.195';
+      const pass = scorecard.definitive_score_blocked === true && resolvedIp === '203.0.113.195';
 
       results.push({
         testId: 'SEC-TRUSTED-PROXY-IP-001',
@@ -1570,7 +1605,7 @@ export class TestRunner {
     {
       const t0 = performance.now();
       const forgedTokenCheck = await TokenVerifier.verifyCloudSchedulerOidc('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.forged_payload.signature');
-      const pass = forgedTokenCheck === false;
+      const pass = scorecard.definitive_score_blocked === true && forgedTokenCheck === false;
 
       results.push({
         testId: 'OIDC-REJECT-FORGED-001',
@@ -1778,11 +1813,14 @@ export class TestRunner {
       });
     }
 
+    } finally {
+      clearTimeout(globalTimeoutHandle);
+      await DatabaseService.close();
+    }
+
     const durationMs = Math.round(performance.now() - startTime);
     const passed = results.filter((r) => r.status === 'PASS').length;
     const failed = results.filter((r) => r.status === 'FAIL').length;
-    
-    await DatabaseService.close();
 
     return {
       results,

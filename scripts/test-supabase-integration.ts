@@ -102,8 +102,22 @@ async function runLiveSupabaseTests() {
         }
 
         // Cleanup test object
-        await adminClient.storage.from('invoices').remove([storagePath]);
-        console.log('✓ TEST 3 Cleanup: Successfully removed test object from storage.');
+        const { data: removedList, error: remErr } = await adminClient.storage.from('invoices').remove([storagePath]);
+        if (remErr) {
+          console.error('✗ TEST 3 FAIL: Could not remove test object:', remErr.message);
+          allPassed = false;
+        } else {
+          console.log('✓ TEST 3 Cleanup: Remove call returned:', JSON.stringify(removedList));
+          
+          // Verify it's gone
+          const { data: goneData, error: goneErr } = await adminClient.storage.from('invoices').download(storagePath);
+          if (goneErr) {
+            console.log('✓ TEST 3 PASS: Object correctly inaccessible after removal:', goneErr.message);
+          } else if (goneData) {
+            console.error('✗ TEST 3 FAIL: Object STILL EXISTS after removal!');
+            allPassed = false;
+          }
+        }
       }
     } catch (err: any) {
       console.error('✗ TEST 3 FAIL:', err.message);

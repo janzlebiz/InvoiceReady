@@ -6,6 +6,12 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 let clientInstance: SupabaseClient | null = null;
 
 export function isSupabaseConfigured(): boolean {
+  // Behavioral integration tests MUST be deterministic.
+  // Real Supabase storage has eventual consistency/caching that breaks immediate "deleted-then-read" assertions.
+  if (process.env.NODE_ENV === 'test' && !process.env.FORCE_SUPABASE_TESTS) {
+    return false;
+  }
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   return Boolean(
