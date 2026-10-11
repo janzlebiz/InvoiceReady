@@ -218,6 +218,12 @@ CREATE TABLE IF NOT EXISTS public.scan_documents (
     status VARCHAR(32) NOT NULL DEFAULT 'SECURITY_PASSED',
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+ALTER TABLE public.scan_documents ADD COLUMN IF NOT EXISTS scan_id VARCHAR(64);
+ALTER TABLE public.scan_documents ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT;
+ALTER TABLE public.scan_documents ADD COLUMN IF NOT EXISTS mime_type VARCHAR(128);
+ALTER TABLE public.scan_documents ADD COLUMN IF NOT EXISTS sha256_hash VARCHAR(64);
+ALTER TABLE public.scan_documents ADD COLUMN IF NOT EXISTS retention_expires_at TIMESTAMPTZ;
+ALTER TABLE public.scan_documents ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'SECURITY_PASSED';
 
 -- 8. Scan Reports Table
 CREATE TABLE IF NOT EXISTS public.scan_reports (
@@ -230,6 +236,10 @@ CREATE TABLE IF NOT EXISTS public.scan_reports (
     retention_expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+ALTER TABLE public.scan_reports ADD COLUMN IF NOT EXISTS scan_id VARCHAR(64);
+ALTER TABLE public.scan_reports ADD COLUMN IF NOT EXISTS rule_pack_version VARCHAR(32);
+ALTER TABLE public.scan_reports ADD COLUMN IF NOT EXISTS storage_path VARCHAR(512);
+ALTER TABLE public.scan_reports ADD COLUMN IF NOT EXISTS retention_expires_at TIMESTAMPTZ;
 
 -- 9. Findings Table
 CREATE TABLE IF NOT EXISTS public.findings (
@@ -247,6 +257,13 @@ CREATE TABLE IF NOT EXISTS public.findings (
     actual_value TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+ALTER TABLE public.findings ADD COLUMN IF NOT EXISTS scan_id VARCHAR(64);
+ALTER TABLE public.findings ADD COLUMN IF NOT EXISTS title TEXT;
+ALTER TABLE public.findings ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.findings ADD COLUMN IF NOT EXISTS legal_reference TEXT;
+ALTER TABLE public.findings ADD COLUMN IF NOT EXISTS field_name TEXT;
+ALTER TABLE public.findings ADD COLUMN IF NOT EXISTS expected_value TEXT;
+ALTER TABLE public.findings ADD COLUMN IF NOT EXISTS actual_value TEXT;
 
 -- 10. Remediations Table
 CREATE TABLE IF NOT EXISTS public.remediations (

@@ -310,7 +310,7 @@ async function runLiveSupabaseSuite() {
     // -------------------------------------------------------------------------
     // TEST 6: Durable Queue Recovery & Concurrency Exclusion via JobQueue Implementation
     // -------------------------------------------------------------------------
-    console.log('\n[6/6] Verifying Durable Queue Atomic Concurrency & Lease Expiry Recovery via JobQueue...');
+    console.log('\n[6/6] Verifying Durable Queue Atomic Concurrency, Recovery, & Processing via JobQueue...');
     const testOpId = `op_live_${runId}`;
 
     // 6.1: Enqueue job via JobQueue.registerOrGetJob
@@ -320,11 +320,11 @@ async function runLiveSupabaseSuite() {
     // 6.2: Worker 1 claims job lease using actual JobQueue.claimJobLease
     const worker1Claimed = await JobQueue.claimJobLease(testOpId, orgAId, 'worker_1', 60);
 
-    // 6.3: Concurrent Worker 2 attempts to claim same job -> Must be locked out (false)
+    // 6.3: Concurrent Worker 2 attempts to claim same job -> Must be excluded/locked out (false)
     const worker2Claimed = await JobQueue.claimJobLease(testOpId, orgAId, 'worker_2', 60);
     const worker2LockedOut = !worker2Claimed;
 
-    // 6.4: Simulate lease expiry and execute actual JobQueue.recoverStaleAndPendingJobs()
+    // 6.4: Simulate lease expiry and execute JobQueue.recoverStaleAndPendingJobs()
     await adminClient
       .from('job_queue')
       .update({
@@ -333,16 +333,46 @@ async function runLiveSupabaseSuite() {
       .eq('operation_id', testOpId);
 
     const supervisorResult = await JobQueue.recoverStaleAndPendingJobs('supervisor_worker');
-    const leaseRecoveryPassed = supervisorResult.recoveredCount > 0;
+    const leaseRecoveryPassed = supervisorResult.recoveredCount > 0 && supervisorResult.processedCount > 0;
 
-    const queuePassed = jobEnqueued && worker1Claimed && worker2LockedOut && leaseRecoveryPassed;
+    // 6.5: Verify final persisted job status in database
+    const finalJob = await JobQueue.getJob(testOpId, orgAId);
+    const finalStatusValid = Boolean(finalJob && (finalJob.status === 'COMPLETED' || finalJob.status === 'FAILED'));
+
+    // 6.6: Verify retry limits & terminal failure handling
+    const terminalOpId = `op_term_${runId}`;
+    await adminClient.from('job_queue').insert({
+      operation_id: terminalOpId,
+      scan_id: scanAId,
+      organization_id: orgAId,
+      status: 'QUEUED',
+      attempt_count: 3,
+      max_attempts: 3,
+      payload: { terminalTest: true },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    });
+
+    await JobQueue.recoverStaleAndPendingJobs('supervisor_worker');
+    const { data: termJob } = await adminClient
+      .from('job_queue')
+      .select('*')
+      .eq('operation_id', terminalOpId)
+      .single();
+
+    const terminalRetryHandled = Boolean(termJob && termJob.status === 'FAILED' && termJob.error_message?.includes('Terminal failure'));
+
+    // Teardown terminal test job
+    await adminClient.from('job_queue').delete().eq('operation_id', terminalOpId);
+
+    const queuePassed = jobEnqueued && worker1Claimed && worker2LockedOut && leaseRecoveryPassed && finalStatusValid && terminalRetryHandled;
     testResults.push({
       name: 'LIVE-DURABLE-QUEUE-RECOVERY-001',
       category: 'QUEUE',
       passed: queuePassed,
       details: queuePassed
-        ? 'Durable job queue proven via JobQueue implementation: concurrent worker lockout enforced and expired lease successfully recovered by supervisor.'
-        : `Queue test failed: enqueued=${jobEnqueued}, w1Claimed=${worker1Claimed}, w2LockedOut=${worker2LockedOut}, recoveredCount=${supervisorResult.recoveredCount}`,
+        ? 'Durable job queue proven via JobQueue implementation: worker exclusion enforced, lease recovery executed, final job status persisted, and bounded retry limit enforced.'
+        : `Queue test failed: enqueued=${jobEnqueued}, w1Claimed=${worker1Claimed}, w2LockedOut=${worker2LockedOut}, recoveryPassed=${leaseRecoveryPassed}, finalStatusValid=${finalStatusValid}, terminalRetryHandled=${terminalRetryHandled}`,
     });
     console.log(`  ✓ Durable Queue Recovery & Concurrency (JobQueue): ${queuePassed ? 'PASS' : 'FAIL'}`);
   } catch (fatalErr: any) {
