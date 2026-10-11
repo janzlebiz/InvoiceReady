@@ -404,30 +404,81 @@ async function runLiveSupabaseSuite() {
     // CLEAN TEARDOWN: Guaranteed Zero Test Artifacts
     // -------------------------------------------------------------------------
     console.log('\n[Teardown] Cleaning up remote test resources...');
+    const cleanupFailures: string[] = [];
+
     for (const f of cleanupFiles) {
       try {
-        await adminClient.storage.from(f.bucket).remove([f.path]);
-      } catch (_) {}
+        const { error } = await adminClient.storage.from(f.bucket).remove([f.path]);
+        if (error) {
+          cleanupFailures.push(`Storage deletion failed for ${f.bucket}/${f.path}: ${error.message}`);
+        }
+      } catch (err: any) {
+        cleanupFailures.push(`Storage deletion exception for ${f.bucket}/${f.path}: ${err.message}`);
+      }
     }
     for (const scanId of cleanupScans) {
       try {
-        await adminClient.from('job_queue').delete().eq('scan_id', scanId);
-        await adminClient.from('scan_sessions').delete().eq('session_id', scanId);
-      } catch (_) {}
+        const { error: jqErr } = await adminClient.from('job_queue').delete().eq('scan_id', scanId);
+        if (jqErr) {
+          cleanupFailures.push(`job_queue cleanup failed for scan ${scanId}: ${jqErr.message}`);
+        }
+        const { error: ssErr } = await adminClient.from('scan_sessions').delete().eq('session_id', scanId);
+        if (ssErr) {
+          cleanupFailures.push(`scan_sessions cleanup failed for scan ${scanId}: ${ssErr.message}`);
+        }
+      } catch (err: any) {
+        cleanupFailures.push(`Scan cleanup exception for ${scanId}: ${err.message}`);
+      }
     }
     for (const orgId of cleanupOrgs) {
       try {
-        await adminClient.from('organization_users').delete().eq('organization_id', orgId);
-        await adminClient.from('organizations').delete().eq('organization_id', orgId);
-      } catch (_) {}
+        const { error: ouErr } = await adminClient.from('organization_users').delete().eq('organization_id', orgId);
+        if (ouErr) {
+          cleanupFailures.push(`organization_users cleanup failed for org ${orgId}: ${ouErr.message}`);
+        }
+        const { error: oErr } = await adminClient.from('organizations').delete().eq('organization_id', orgId);
+        if (oErr) {
+          cleanupFailures.push(`organizations cleanup failed for org ${orgId}: ${oErr.message}`);
+        }
+      } catch (err: any) {
+        cleanupFailures.push(`Organization cleanup exception for ${orgId}: ${err.message}`);
+      }
     }
     for (const uid of cleanupUsers) {
       try {
-        await adminClient.from('profiles').delete().eq('id', uid);
-        await adminClient.auth.admin.deleteUser(uid);
-      } catch (_) {}
+        const { error: pErr } = await adminClient.from('profiles').delete().eq('id', uid);
+        if (pErr) {
+          cleanupFailures.push(`profiles cleanup failed for user ${uid}: ${pErr.message}`);
+        }
+        const { error: uErr } = await adminClient.auth.admin.deleteUser(uid);
+        if (uErr) {
+          cleanupFailures.push(`auth user deletion failed for user ${uid}: ${uErr.message}`);
+        }
+      } catch (err: any) {
+        cleanupFailures.push(`User cleanup exception for ${uid}: ${err.message}`);
+      }
     }
-    console.log('  ✓ Teardown complete. Zero test debris remaining.');
+
+    if (cleanupFailures.length > 0) {
+      console.error(`  ✗ Teardown FAILED with ${cleanupFailures.length} cleanup error(s):`);
+      for (const fail of cleanupFailures) {
+        console.error(`    - ${fail}`);
+      }
+      testResults.push({
+        name: 'LIVE-TEARDOWN-CLEANUP-001',
+        category: 'DELETION',
+        passed: false,
+        details: `Teardown failed: ${cleanupFailures.join('; ')}`,
+      });
+    } else {
+      console.log('  ✓ Teardown complete. Zero test debris remaining.');
+      testResults.push({
+        name: 'LIVE-TEARDOWN-CLEANUP-001',
+        category: 'DELETION',
+        passed: true,
+        details: 'Guaranteed zero test debris remaining: all test users, organizations, scan sessions, queue jobs, and storage files completely removed.',
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------

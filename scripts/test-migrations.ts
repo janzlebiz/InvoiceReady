@@ -51,6 +51,20 @@ const REQUIRED_INDEXES = [
   'idx_org_users_lookup'
 ];
 
+export const REQUIRED_POLICIES: { table: string; policy: string }[] = [
+  { table: 'organizations', policy: 'Tenant members can view organizations' },
+  { table: 'profiles', policy: 'Users can view own profile' },
+  { table: 'profiles', policy: 'Users can update own profile' },
+  { table: 'scan_sessions', policy: 'Tenant members can view scan sessions' },
+  { table: 'scan_sessions', policy: 'Tenant analysts and owners can insert scan sessions' },
+  { table: 'scan_documents', policy: 'Tenant members can view scan documents' },
+  { table: 'scan_reports', policy: 'Tenant members can view scan reports' },
+  { table: 'findings', policy: 'Tenant members can view findings' },
+  { table: 'remediations', policy: 'Tenant members can view remediations' },
+  { table: 'job_queue', policy: 'Tenant members can view job queue' },
+  { table: 'audit_logs', policy: 'Admins and owners can read audit logs' },
+];
+
 async function runMigrationTests() {
   console.log('================================================================');
   console.log('    INVOICEREADY AUTHORITATIVE MIGRATION & UPGRADE TEST SUITE   ');
@@ -109,20 +123,7 @@ async function runMigrationTests() {
     // Assert Specific RLS Policies
     const policyRes = await freshDb.query(`SELECT tablename, policyname FROM pg_policies WHERE schemaname = 'public'`);
     const policyRows = policyRes.rows as { tablename: string; policyname: string }[];
-    const expectedPolicies = [
-      { table: 'organizations', policy: 'Tenant members can view organizations' },
-      { table: 'profiles', policy: 'Users can view own profile' },
-      { table: 'profiles', policy: 'Users can update own profile' },
-      { table: 'scan_sessions', policy: 'Tenant members can view scan sessions' },
-      { table: 'scan_sessions', policy: 'Tenant analysts and owners can insert scan sessions' },
-      { table: 'scan_documents', policy: 'Tenant members can view scan documents' },
-      { table: 'scan_reports', policy: 'Tenant members can view scan reports' },
-      { table: 'findings', policy: 'Tenant members can view findings' },
-      { table: 'remediations', policy: 'Tenant members can view remediations' },
-      { table: 'job_queue', policy: 'Tenant members can view job queue' },
-      { table: 'audit_logs', policy: 'Admins and owners can read audit logs' },
-    ];
-    const missingPolicies = expectedPolicies.filter(
+    const missingPolicies = REQUIRED_POLICIES.filter(
       ep => !policyRows.some(pr => pr.tablename === ep.table && pr.policyname === ep.policy)
     );
 
@@ -450,68 +451,106 @@ async function runMigrationTests() {
 
       // Call hardened schema verification RPC
       let liveTablesValid = true;
+      const rpcFailures: string[] = [];
+
       const { data: rpcData, error: rpcErr } = await adminClient.rpc('get_schema_verification');
-      if (rpcErr || !rpcData) {
-        console.error(`  ✗ get_schema_verification RPC failed: ${rpcErr?.message || 'No data returned'}. Ensure migration 0005 is applied.`);
-        liveTablesValid = false; // Trigger failure
+      if (rpcErr) {
+        liveTablesValid = false;
+        rpcFailures.push(`get_schema_verification RPC error: ${rpcErr.message}`);
+        console.error(`  ✗ get_schema_verification RPC failed: ${rpcErr.message}`);
+      } else if (!rpcData || typeof rpcData !== 'object') {
+        liveTablesValid = false;
+        rpcFailures.push('get_schema_verification RPC returned null or non-object');
+        console.error('  ✗ get_schema_verification RPC returned null or invalid payload');
       } else {
-        // Assert Tables
-        const dbTables = rpcData.tables || [];
-        const missingTables = REQUIRED_TABLES.filter(t => !dbTables.includes(t));
-        if (missingTables.length > 0) {
+        // Assert Tables (fail-closed if missing/malformed or any required table is absent)
+        if (!Array.isArray(rpcData.tables)) {
           liveTablesValid = false;
-          console.error(`  ✗ Missing tables in live DB: ${missingTables.join(', ')}`);
+          rpcFailures.push('rpcData.tables is missing or malformed');
+          console.error('  ✗ rpcData.tables is missing or malformed');
+        } else {
+          const missingTables = REQUIRED_TABLES.filter(t => !rpcData.tables.includes(t));
+          if (missingTables.length > 0) {
+            liveTablesValid = false;
+            rpcFailures.push(`Missing tables: [${missingTables.join(', ')}]`);
+            console.error(`  ✗ Missing tables in live DB: ${missingTables.join(', ')}`);
+          }
         }
 
-        // Assert Views
-        const dbViews = rpcData.views || [];
-        const requiredViews = ['users', 'scans']; // Minimal critical views for RPC integration
-        const missingViews = requiredViews.filter(v => !dbViews.includes(v));
-        if (missingViews.length > 0) {
+        // Assert Views (strictly enforce all REQUIRED_VIEWS, no critical vs non-critical distinction)
+        if (!Array.isArray(rpcData.views)) {
           liveTablesValid = false;
-          console.error(`  ✗ Missing critical views in live DB: ${missingViews.join(', ')}`);
-        }
-        // Log discrepancies for non-critical views
-        const allRequiredViews = ['users', 'scans', 'documents', 'reports', 'consents'];
-        const trulyMissingViews = allRequiredViews.filter(v => !dbViews.includes(v));
-        if (trulyMissingViews.length > 0) {
-          console.warn(`  ! Non-critical views missing: ${trulyMissingViews.join(', ')}`);
+          rpcFailures.push('rpcData.views is missing or malformed');
+          console.error('  ✗ rpcData.views is missing or malformed');
+        } else {
+          const missingViews = REQUIRED_VIEWS.filter(v => !rpcData.views.includes(v));
+          if (missingViews.length > 0) {
+            liveTablesValid = false;
+            rpcFailures.push(`Missing required views: [${missingViews.join(', ')}]`);
+            console.error(`  ✗ Missing required views in live DB: ${missingViews.join(', ')}`);
+          }
         }
 
-        // Assert Indexes
-        const dbIndexes = rpcData.indexes || [];
-        const criticalIndexes = ['idx_job_queue_status']; // Minimal critical indexes
-        const missingIndexes = criticalIndexes.filter(idx => !dbIndexes.includes(idx));
-        if (missingIndexes.length > 0) {
+        // Assert Indexes (strictly enforce all REQUIRED_INDEXES, no critical vs non-critical distinction)
+        if (!Array.isArray(rpcData.indexes)) {
           liveTablesValid = false;
-          console.error(`  ✗ Missing critical indexes in live DB: ${missingIndexes.join(', ')}`);
-        }
-        // Log discrepancies for non-critical indexes
-        const allRequiredIndexes = ['idx_scan_sessions_org', 'idx_scan_documents_retention', 'idx_audit_logs_org_time', 'idx_job_queue_status', 'idx_org_users_lookup'];
-        const trulyMissingIndexes = allRequiredIndexes.filter(idx => !dbIndexes.includes(idx));
-        if (trulyMissingIndexes.length > 0) {
-          console.warn(`  ! Non-critical indexes missing: ${trulyMissingIndexes.join(', ')}`);
-        }
-
-        // Assert RLS on Tenant Tables
-        const rlsTables = rpcData.rls_tables || [];
-        const missingRls = REQUIRED_TABLES.filter(t => !rlsTables.includes(t));
-        if (missingRls.length > 0) {
-          liveTablesValid = false;
-          console.error(`  ✗ Missing RLS enablement on live tables: ${missingRls.join(', ')}`);
+          rpcFailures.push('rpcData.indexes is missing or malformed');
+          console.error('  ✗ rpcData.indexes is missing or malformed');
+        } else {
+          const missingIndexes = REQUIRED_INDEXES.filter(idx => !rpcData.indexes.includes(idx));
+          if (missingIndexes.length > 0) {
+            liveTablesValid = false;
+            rpcFailures.push(`Missing required indexes: [${missingIndexes.join(', ')}]`);
+            console.error(`  ✗ Missing required indexes in live DB: ${missingIndexes.join(', ')}`);
+          }
         }
 
-        // Assert Security Policies
-        const policies = rpcData.policies || [];
-        if (!Array.isArray(policies) || policies.length === 0) {
+        // Assert RLS on Tenant Tables (strictly enforce all REQUIRED_TABLES in rls_tables)
+        if (!Array.isArray(rpcData.rls_tables)) {
           liveTablesValid = false;
-          console.error(`  ✗ No security policies found in live DB.`);
+          rpcFailures.push('rpcData.rls_tables is missing or malformed');
+          console.error('  ✗ rpcData.rls_tables is missing or malformed');
+        } else {
+          const missingRls = REQUIRED_TABLES.filter(t => !rpcData.rls_tables.includes(t));
+          if (missingRls.length > 0) {
+            liveTablesValid = false;
+            rpcFailures.push(`Missing RLS enablement: [${missingRls.join(', ')}]`);
+            console.error(`  ✗ Missing RLS enablement on live tables: ${missingRls.join(', ')}`);
+          }
+        }
+
+        // Assert Security Policies (exact table + policy match against authoritative REQUIRED_POLICIES)
+        if (!Array.isArray(rpcData.policies)) {
+          liveTablesValid = false;
+          rpcFailures.push('rpcData.policies is missing or malformed');
+          console.error('  ✗ rpcData.policies is missing or malformed');
+        } else {
+          const malformedPolicies = rpcData.policies.some(
+            (p: any) => !p || typeof p !== 'object' || typeof p.table !== 'string' || typeof p.policy !== 'string'
+          );
+          if (malformedPolicies) {
+            liveTablesValid = false;
+            rpcFailures.push('rpcData.policies contains malformed policy entries');
+            console.error('  ✗ rpcData.policies contains malformed policy entries');
+          } else {
+            const missingLivePolicies = REQUIRED_POLICIES.filter(
+              ep => !rpcData.policies.some((rp: { table: string; policy: string }) => rp.table === ep.table && rp.policy === ep.policy)
+            );
+            if (missingLivePolicies.length > 0) {
+              liveTablesValid = false;
+              const missingList = missingLivePolicies.map(p => `${p.table} -> "${p.policy}"`).join(', ');
+              rpcFailures.push(`Missing required policies: [${missingList}]`);
+              console.error(`  ✗ Missing required security policies in live DB: ${missingList}`);
+            }
+          }
         }
       }
 
       const { data: buckets, error: bErr } = await adminClient.storage.listBuckets();
       let liveBucketsValid = false;
       if (bErr || !buckets) {
+        liveBucketsValid = false;
+        rpcFailures.push(`Storage buckets listing failed: ${bErr?.message || 'null data'}`);
         console.error(`  ✗ Storage buckets listing failed: ${bErr?.message}`);
       } else {
         const bucketNames = buckets.map(b => b.name);
@@ -520,6 +559,8 @@ async function runMigrationTests() {
         const publicBuckets = buckets.filter(b => b.public && requiredBuckets.includes(b.name));
         liveBucketsValid = missingBuckets.length === 0 && publicBuckets.length === 0;
         if (!liveBucketsValid) {
+          if (missingBuckets.length > 0) rpcFailures.push(`Missing storage buckets: [${missingBuckets.join(', ')}]`);
+          if (publicBuckets.length > 0) rpcFailures.push(`Publicly exposed storage buckets: [${publicBuckets.map(b => b.name).join(', ')}]`);
           console.error(`  ✗ Live buckets invalid. Missing: [${missingBuckets.join(',')}], Leaked public: [${publicBuckets.map(b => b.name).join(',')}]`);
         }
       }
@@ -530,8 +571,8 @@ async function runMigrationTests() {
         passed: livePass,
         mode: 'Real Supabase PostgreSQL Environment (Remote Live)',
         details: livePass
-          ? `Verified against real remote Supabase PostgreSQL instance (${new URL(supabaseUrl).hostname}): all 14 authoritative tables, 5 compatibility views, 5 indexes, RLS enablement, and security policies validated via hardened get_schema_verification() RPC; all 3 private storage buckets verified.`
-          : `Remote Supabase verification failed: schema_rpc_valid=${liveTablesValid}, buckets_valid=${liveBucketsValid}`
+          ? `Verified against real remote Supabase PostgreSQL instance (${new URL(supabaseUrl).hostname}): all ${REQUIRED_TABLES.length} authoritative tables, all ${REQUIRED_VIEWS.length} compatibility views, all ${REQUIRED_INDEXES.length} indexes, RLS enabled on all 14 tables, and all ${REQUIRED_POLICIES.length} authoritative security policies validated via get_schema_verification() RPC; all 3 private storage buckets verified.`
+          : `Remote Supabase verification failed: ${rpcFailures.join('; ')}`
       });
       console.log(`  ✓ Live Supabase Target Schema Verification: ${livePass ? 'PASS' : 'FAIL'}`);
       if (!livePass) overallPassed = false;
