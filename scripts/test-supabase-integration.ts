@@ -308,70 +308,32 @@ async function runLiveSupabaseSuite() {
     console.log(`  ✓ Authoritative Physical Deletion: ${deletionVerificationPassed ? 'PASS' : 'FAIL'}`);
 
     // -------------------------------------------------------------------------
-    // TEST 6: Durable Queue Recovery & Concurrency Exclusion in PostgreSQL
+    // TEST 6: Durable Queue Recovery & Concurrency Exclusion via JobQueue Implementation
     // -------------------------------------------------------------------------
-    console.log('\n[6/6] Verifying Durable Queue Atomic Concurrency & Lease Expiry Recovery...');
+    console.log('\n[6/6] Verifying Durable Queue Atomic Concurrency & Lease Expiry Recovery via JobQueue...');
     const testOpId = `op_live_${runId}`;
 
-    // 6.1: Enqueue job
-    const { error: qInsErr } = await adminClient.from('job_queue').insert({
-      operation_id: testOpId,
-      scan_id: scanAId,
-      organization_id: orgAId,
-      status: 'QUEUED',
-      attempt_count: 0,
-      max_attempts: 3,
-    });
-    const jobEnqueued = !qInsErr;
+    // 6.1: Enqueue job via JobQueue.registerOrGetJob
+    const regRes = await JobQueue.registerOrGetJob(scanAId, orgAId, testOpId, { test: true });
+    const jobEnqueued = Boolean(regRes && regRes.job);
 
-    // 6.2: Worker 1 claims job lease
-    const { data: claim1, error: c1Err } = await adminClient
-      .from('job_queue')
-      .update({
-        status: 'PROCESSING',
-        locked_by: 'worker_1',
-        locked_at: new Date().toISOString(),
-        lease_expires_at: new Date(Date.now() + 60000).toISOString(),
-        attempt_count: 1,
-      })
-      .eq('operation_id', testOpId)
-      .eq('status', 'QUEUED')
-      .select();
-    const worker1Claimed = !c1Err && Array.isArray(claim1) && claim1.length === 1;
+    // 6.2: Worker 1 claims job lease using actual JobQueue.claimJobLease
+    const worker1Claimed = await JobQueue.claimJobLease(testOpId, orgAId, 'worker_1', 60);
 
-    // 6.3: Concurrent Worker 2 attempts to claim same job -> Must be rejected (0 rows updated)
-    const { data: claim2, error: c2Err } = await adminClient
-      .from('job_queue')
-      .update({
-        status: 'PROCESSING',
-        locked_by: 'worker_2',
-        attempt_count: 2,
-      })
-      .eq('operation_id', testOpId)
-      .eq('status', 'QUEUED')
-      .select();
-    const worker2LockedOut = !c2Err && Array.isArray(claim2) && claim2.length === 0;
+    // 6.3: Concurrent Worker 2 attempts to claim same job -> Must be locked out (false)
+    const worker2Claimed = await JobQueue.claimJobLease(testOpId, orgAId, 'worker_2', 60);
+    const worker2LockedOut = !worker2Claimed;
 
-    // 6.4: Simulate lease expiry and supervisor recovery
+    // 6.4: Simulate lease expiry and execute actual JobQueue.recoverStaleAndPendingJobs()
     await adminClient
       .from('job_queue')
       .update({
-        lease_expires_at: new Date(Date.now() - 5000).toISOString(),
+        lease_expires_at: new Date(Date.now() - 15000).toISOString(),
       })
       .eq('operation_id', testOpId);
 
-    const { data: recovered, error: recErr } = await adminClient
-      .from('job_queue')
-      .update({
-        status: 'PROCESSING',
-        locked_by: 'supervisor_recovery',
-        lease_expires_at: new Date(Date.now() + 60000).toISOString(),
-        attempt_count: 2,
-      })
-      .eq('operation_id', testOpId)
-      .lt('lease_expires_at', new Date().toISOString())
-      .select();
-    const leaseRecoveryPassed = !recErr && Array.isArray(recovered) && recovered.length === 1;
+    const supervisorResult = await JobQueue.recoverStaleAndPendingJobs('supervisor_worker');
+    const leaseRecoveryPassed = supervisorResult.recoveredCount > 0;
 
     const queuePassed = jobEnqueued && worker1Claimed && worker2LockedOut && leaseRecoveryPassed;
     testResults.push({
@@ -379,10 +341,10 @@ async function runLiveSupabaseSuite() {
       category: 'QUEUE',
       passed: queuePassed,
       details: queuePassed
-        ? 'Durable job queue proven in PostgreSQL: concurrent worker lockout enforced and expired lease successfully recovered by supervisor.'
-        : `Queue test failed: enqueued=${jobEnqueued}, w1Claimed=${worker1Claimed}, w2LockedOut=${worker2LockedOut}, leaseRecovered=${leaseRecoveryPassed}`,
+        ? 'Durable job queue proven via JobQueue implementation: concurrent worker lockout enforced and expired lease successfully recovered by supervisor.'
+        : `Queue test failed: enqueued=${jobEnqueued}, w1Claimed=${worker1Claimed}, w2LockedOut=${worker2LockedOut}, recoveredCount=${supervisorResult.recoveredCount}`,
     });
-    console.log(`  ✓ Durable Queue Recovery & Concurrency: ${queuePassed ? 'PASS' : 'FAIL'}`);
+    console.log(`  ✓ Durable Queue Recovery & Concurrency (JobQueue): ${queuePassed ? 'PASS' : 'FAIL'}`);
   } catch (fatalErr: any) {
     console.error('FATAL LIVE TEST EXCEPTION:', fatalErr);
     testResults.push({

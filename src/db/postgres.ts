@@ -72,10 +72,19 @@ export class DatabaseService {
       }
     }
 
-    if (process.env.DATABASE_URL) {
+    const dbUrl = process.env.DATABASE_URL;
+    const isValidDbUrl = Boolean(
+      dbUrl &&
+      !dbUrl.includes('REDACTED') &&
+      !dbUrl.includes('[') &&
+      !dbUrl.includes(']') &&
+      (dbUrl.startsWith('postgres://') || dbUrl.startsWith('postgresql://'))
+    );
+
+    if (isValidDbUrl) {
       try {
         const pool = new Pool({
-          connectionString: process.env.DATABASE_URL,
+          connectionString: dbUrl,
           max: 15,
           idleTimeoutMillis: 30000,
           connectionTimeoutMillis: 5000,

@@ -15,8 +15,12 @@ npm run build
 echo "Step 3: Behavioral Integration Tests..."
 timeout 300 npm test || (echo "Behavioral tests failed or timed out" && exit 1)
 
-# 4. Live Supabase Integration Tests
-echo "Step 4: Live Supabase Integration Tests..."
+# 4. Migration & Upgrade Verification Suite (Fresh & Upgrade)
+echo "Step 4: Migration & Upgrade Verification Suite..."
+npm run test:migrations || (echo "Migration tests failed" && exit 1)
+
+# 5. Live Supabase Integration Tests
+echo "Step 5: Live Supabase Integration Tests..."
 if [ -n "$NEXT_PUBLIC_SUPABASE_URL" ]; then
   FORCE_SUPABASE_TESTS=true npx tsx scripts/test-supabase-integration.ts
 else

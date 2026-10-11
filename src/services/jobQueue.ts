@@ -132,7 +132,31 @@ export class JobQueue {
     workerId: string,
     leaseDurationSeconds: number = 60
   ): Promise<boolean> {
-    return DatabaseService.claimJobLease(operationId, organizationId, workerId, leaseDurationSeconds);
+    try {
+      return await DatabaseService.claimJobLease(operationId, organizationId, workerId, leaseDurationSeconds);
+    } catch {
+      const { getSupabaseAdmin } = await import('./supabaseClient');
+      const admin = getSupabaseAdmin();
+      if (!admin) return false;
+      const now = new Date();
+      const leaseExpiry = new Date(now.getTime() + leaseDurationSeconds * 1000).toISOString();
+      const { data, error } = await admin
+        .from('job_queue')
+        .update({
+          status: 'PROCESSING',
+          locked_by: workerId,
+          locked_at: now.toISOString(),
+          lease_expires_at: leaseExpiry,
+          attempt_count: 1,
+          updated_at: now.toISOString(),
+        })
+        .eq('operation_id', operationId)
+        .eq('organization_id', organizationId)
+        .lt('attempt_count', 3)
+        .in('status', ['QUEUED', 'PROCESSING', 'FAILED'])
+        .select('operation_id');
+      return !error && Array.isArray(data) && data.length > 0;
+    }
   }
 
   public static async enqueueWorker(
@@ -197,7 +221,21 @@ export class JobQueue {
     let processedCount = 0;
 
     try {
-      const pendingJobs = await DatabaseService.getPendingQueueJobs();
+      let pendingJobs: any[] = [];
+      try {
+        pendingJobs = await DatabaseService.getPendingQueueJobs();
+      } catch {
+        const { getSupabaseAdmin } = await import('./supabaseClient');
+        const admin = getSupabaseAdmin();
+        if (admin) {
+          const { data } = await admin
+            .from('job_queue')
+            .select('*')
+            .lt('lease_expires_at', new Date().toISOString());
+          pendingJobs = data || [];
+        }
+      }
+
       for (const job of pendingJobs) {
         // Enforce bounded retries check
         if (job.attempt_count >= job.max_attempts) {

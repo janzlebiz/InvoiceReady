@@ -66,6 +66,8 @@ CREATE TABLE IF NOT EXISTS public.organizations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS created_by VARCHAR(64);
+ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now());
 
 -- 2. Profiles Table (Mirrors auth.users and maps user identities)
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -79,6 +81,9 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role VARCHAR(32) DEFAULT 'ANALYST';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS default_organization_id VARCHAR(64);
 
 -- 3. Organization Membership (RBAC Mapping)
 CREATE TABLE IF NOT EXISTS public.organization_users (
@@ -89,6 +94,8 @@ CREATE TABLE IF NOT EXISTS public.organization_users (
     joined_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     UNIQUE(organization_id, user_id)
 );
+ALTER TABLE public.organization_users ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
+ALTER TABLE public.organization_users ADD COLUMN IF NOT EXISTS role VARCHAR(32) DEFAULT 'ANALYST';
 
 -- 4. Business Profiles
 CREATE TABLE IF NOT EXISTS public.business_profiles (
@@ -168,6 +175,33 @@ CREATE TABLE IF NOT EXISTS public.scan_sessions (
     completed_at TIMESTAMPTZ,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS created_by VARCHAR(64);
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS scan_id VARCHAR(64);
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS rule_pack_version VARCHAR(32) DEFAULT 'AE-2026.2';
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS document_name VARCHAR(255);
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS document_mime_type VARCHAR(128);
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS document_size_bytes BIGINT;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS document_hash VARCHAR(128);
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS file_name VARCHAR(255);
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS file_sha256 TEXT;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS storage_path VARCHAR(512);
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS security_scan_result JSONB;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS extraction_result JSONB;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS extraction_json JSONB;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS applicable_rules JSONB;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS validation_results JSONB;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS scorecard JSONB;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS scorecard_json JSONB;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS overall_score NUMERIC(5,2);
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS readiness_status VARCHAR(32) DEFAULT 'ASSESSED';
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS findings JSONB;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS remediation_plan JSONB;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMPTZ;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+ALTER TABLE public.scan_sessions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now());
 
 -- 7. Scan Documents Table
 CREATE TABLE IF NOT EXISTS public.scan_documents (

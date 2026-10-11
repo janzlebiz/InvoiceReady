@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS public.organizations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS created_by UUID;
 
 -- 2. User Profiles (Mirrors auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role VARCHAR(32) DEFAULT 'ANALYST';
 
 -- 3. Organization Membership (RBAC Mapping)
 CREATE TABLE IF NOT EXISTS public.organization_users (
@@ -75,6 +77,7 @@ CREATE TABLE IF NOT EXISTS public.organization_users (
     joined_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     UNIQUE(organization_id, user_id)
 );
+ALTER TABLE public.organization_users ADD COLUMN IF NOT EXISTS role VARCHAR(32) DEFAULT 'ANALYST';
 
 -- 4. Business Assessment Profiles
 CREATE TABLE IF NOT EXISTS public.business_profiles (
