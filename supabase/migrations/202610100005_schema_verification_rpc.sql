@@ -1,10 +1,13 @@
 -- InvoiceReady v1.0 - Schema Verification RPC for Live Supabase Verification
 -- Provides a safe, read-only RPC function for inspecting remote database views, indexes, RLS status, and security policies.
 
+BEGIN;
+
 CREATE OR REPLACE FUNCTION public.get_schema_verification()
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
     result JSONB;
@@ -20,4 +23,7 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.get_schema_verification() TO service_role, authenticated;
+REVOKE ALL ON FUNCTION public.get_schema_verification() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.get_schema_verification() TO service_role;
+
+COMMIT;
