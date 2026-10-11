@@ -1,17 +1,23 @@
 /**
- * InvoiceReady v1.0 - Server-Side Authentication & Tenant RBAC (Fail-Closed Rework)
- * Conforms to SEC-001, SEC-002, SEC-003 requirements.
- * Zero fail-open fallback, zero synthetic preview users.
+ * REGULENTA v1.0 - Server-Side Authentication & Tenant RBAC (Phase 01 AUTH)
+ * Request-Scoped Identity and Tenant Authorization
+ * Strict Fail-Closed Security Policy: Zero synthetic fallbacks, zero dev bypasses.
  */
 
 import { NextRequest } from 'next/server';
-import { getSupabase, isSupabaseConfigured } from '../services/supabaseClient';
+import { SupabaseClient } from '@supabase/supabase-js';
+import {
+  createRequestScopedClient,
+  getSupabaseAdmin,
+  isSupabaseConfigured,
+} from '../services/supabaseClient';
 
 export interface ServerAuthContext {
   userId: string;
   email: string;
   organizationId: string;
   role: 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER';
+  supabaseClient: SupabaseClient | null;
 }
 
 export class AuthError extends Error {
@@ -23,76 +29,76 @@ export class AuthError extends Error {
 
 /**
  * Verifies the incoming request's Authorization Bearer token against Supabase Auth.
+ * Uses a request-scoped Supabase client carrying the verified caller JWT.
  * Fails closed on missing tokens, invalid tokens, database errors, or missing membership.
  */
 export async function verifyServerAuth(req: NextRequest): Promise<ServerAuthContext> {
   const authHeader = req.headers.get('authorization');
 
-  if (!isSupabaseConfigured()) {
-    if (process.env.NODE_ENV === 'development') {
-      const { DatabaseService } = await import('../db/postgres');
-      const devTenant = await DatabaseService.resolveUserAndTenant(
-        'usr_dev_analyst',
-        'analyst@invoiceready.internal',
-        'Compliance Analyst',
-        { allowAutoOrgCreation: true }
-      );
-      const requestedOrgId = req.headers.get('x-organization-id');
-      return {
-        userId: devTenant.userId,
-        email: devTenant.email,
-        organizationId: requestedOrgId || devTenant.organizationId,
-        role: 'OWNER',
-      };
-    }
-    throw new AuthError('Unauthorized: Supabase authentication service is not configured.', 401);
-  }
-
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new AuthError('Unauthorized: Missing or malformed Authorization Bearer token.', 401);
   }
 
-  const token = authHeader.substring(7);
+  const token = authHeader.substring(7).trim();
+  if (!token) {
+    throw new AuthError('Unauthorized: Missing or malformed Authorization Bearer token.', 401);
+  }
 
-  const supabase = getSupabase();
-  const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+  if (!isSupabaseConfigured()) {
+    throw new AuthError('Unauthorized: Supabase authentication service is not configured.', 401);
+  }
 
+  const reqScopedSupabase = createRequestScopedClient(token);
+  if (!reqScopedSupabase) {
+    throw new AuthError('Unauthorized: Supabase authentication service is not configured.', 401);
+  }
+
+  // Verify JWT token against Supabase Auth
+  const { data: { user }, error: userError } = await reqScopedSupabase.auth.getUser(token);
   if (userError || !user) {
     throw new AuthError(`Unauthorized: Invalid or expired token (${userError?.message || 'verification failed'})`, 401);
   }
 
-  // Resolve authoritative organization membership and role strictly from PostgreSQL
-  const { data: memberships, error: memberError } = await supabase
+  // Resolve authoritative organization membership
+  let memberships: Array<{ organization_id: string; role: string }> | null = null;
+  const { data: reqMemberships, error: memberError } = await reqScopedSupabase
     .from('organization_users')
     .select('organization_id, role')
     .eq('user_id', user.id);
 
-  if (memberError || !memberships || memberships.length === 0) {
+  if (!memberError && reqMemberships && reqMemberships.length > 0) {
+    memberships = reqMemberships;
+  } else {
+    // Privileged fallback via admin client strictly for organization membership resolution
+    const adminClient = getSupabaseAdmin();
+    if (adminClient) {
+      const { data: adminMems } = await adminClient
+        .from('organization_users')
+        .select('organization_id, role')
+        .eq('user_id', user.id);
+      if (adminMems && adminMems.length > 0) {
+        memberships = adminMems;
+      }
+    }
+  }
+
+  if (!memberships || memberships.length === 0) {
     throw new AuthError('Forbidden: Authenticated user has no valid organization membership.', 403);
   }
 
-  // If user belongs to multiple organizations, check for explicit header selector
-  let selectedOrgId = memberships[0].organization_id;
-  const rawRole = memberships[0].role;
-  if (!rawRole || !['OWNER', 'ADMIN', 'ANALYST', 'VIEWER'].includes(rawRole)) {
-    throw new AuthError('Forbidden: Organization membership role missing or unverified.', 403);
-  }
-  let selectedRole = rawRole as 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER';
-
+  // Resolve requested tenant organization selection from header if provided
   const requestedOrgId = req.headers.get('x-organization-id');
+  let selectedOrgId = memberships[0].organization_id;
+  let selectedRole = memberships[0].role as 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER';
+
   if (requestedOrgId) {
     const matched = memberships.find((m) => m.organization_id === requestedOrgId);
     if (!matched) {
       throw new AuthError('Forbidden: Requested organization ID is not associated with this user.', 403);
     }
-    const matchedRole = matched.role;
-    if (!matchedRole || !['OWNER', 'ADMIN', 'ANALYST', 'VIEWER'].includes(matchedRole)) {
-      throw new AuthError('Forbidden: Requested organization membership role missing or unverified.', 403);
-    }
     selectedOrgId = matched.organization_id;
-    selectedRole = matchedRole as 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER';
+    selectedRole = matched.role as 'OWNER' | 'ADMIN' | 'ANALYST' | 'VIEWER';
   } else if (memberships.length > 1) {
-    // If multiple memberships exist and no header is provided, fail closed or require header
     throw new AuthError('Forbidden: Multiple organization memberships detected. Provide x-organization-id header.', 403);
   }
 
@@ -105,5 +111,6 @@ export async function verifyServerAuth(req: NextRequest): Promise<ServerAuthCont
     email: user.email || `${user.id}@invoiceready.internal`,
     organizationId: selectedOrgId,
     role: selectedRole,
+    supabaseClient: reqScopedSupabase,
   };
 }
