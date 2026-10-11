@@ -15,6 +15,7 @@ import { isSupabaseConfigured } from './supabaseClient';
 
 function shouldUseSupabaseDirectly(): boolean {
   if (process.env.FORCE_SUPABASE_TESTS) return true;
+  if (process.env.NODE_ENV === 'test') return false;
   const dbUrl = process.env.DATABASE_URL;
   const isValidDbUrl = Boolean(
     dbUrl &&
