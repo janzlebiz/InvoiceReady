@@ -21,10 +21,13 @@ npm run test:migrations || (echo "Migration tests failed" && exit 1)
 
 # 5. Live Supabase Integration Tests
 echo "Step 5: Live Supabase Integration Tests..."
-if [ -n "$NEXT_PUBLIC_SUPABASE_URL" ]; then
+if [ -n "$NEXT_PUBLIC_SUPABASE_URL" ] && [ -n "$NEXT_PUBLIC_SUPABASE_ANON_KEY" ] && [ -n "$SUPABASE_SERVICE_ROLE_KEY" ]; then
   FORCE_SUPABASE_TESTS=true npx tsx scripts/test-supabase-integration.ts
 else
-  echo "Skipping live tests: NEXT_PUBLIC_SUPABASE_URL not set"
+  echo "----------------------------------------------------------------"
+  echo "FATAL: Release Gate BLOCKED — Missing required Supabase credentials."
+  echo "NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY are mandatory for live Supabase validation."
+  echo "----------------------------------------------------------------"
   exit 1
 fi
 

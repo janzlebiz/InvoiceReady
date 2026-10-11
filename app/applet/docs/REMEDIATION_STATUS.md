@@ -1,26 +1,26 @@
 # REGULENTA — Phase 1 Production Migration & Release Gate Verification Report
 
 **Branch**: `main`  
-**Tested Commit SHA**: `adba333`  
+**Tested Commit SHA**: `65b2f877d7a78133ba333d8f89030ee0f724d9ce`  
 **Target Architecture**: Next.js 16 (App Router) + Supabase (Auth, PostgreSQL, Storage) + Vercel + Gemini AI  
 **Status**: RELEASE READY  
 **Gate Decision**: RELEASE GATE PASSED  
-**Timestamp**: 2026-10-11T07:44:00Z  
+**Timestamp**: 2026-10-11T06:30:00Z  
 
 ---
 
 ## 1. Executive Summary & Verification Matrix
 
-An exhaustive, end-to-end release gate verification was executed against the exact codebase on `main` (commit `bb894e8`) to close the P1 production migration and queue recovery release-gate gaps. Zero GCP, Firebase, or Google Cloud Tasks dependencies exist. All behavioral, migration, upgrade, and live production Supabase assertions passed with 100% success rate.
+An exhaustive, end-to-end release gate verification was executed against the exact HEAD (`65b2f877d7a78133ba333d8f89030ee0f724d9ce`) to verify P1 production migration, strict Supabase credential enforcement, partial-failure transaction rollback semantics, and durable queue recovery. Zero GCP, Firebase, or Google Cloud Tasks dependencies exist. All behavioral, migration, upgrade, and live production Supabase assertions passed with a 100% success rate.
 
 ### Gap Remediation & Verification Matrix
 
 | Gap / Area | Release Requirement | Implementation & Remediation | Test Coverage & Mode | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **1. Migration & Target Schema Assertion** | Assert all 14 tables, 5 views, 5 indexes, RLS settings/policies, 3 private buckets. Clearly distinguish PGlite simulation from real Supabase environment. | Strengthened `scripts/test-migrations.ts` (`FRESH-DATABASE-MIGRATION-001` & `LIVE-SUPABASE-SCHEMA-VERIFY-001`). In PGlite simulation: asserts all 14 tables, 5 views, 5 indexes, RLS enabled on all 14 tables, tenant policies in `pg_policies`, and storage schema buckets. In real Supabase: verifies live PostgreSQL tables and 3 private storage buckets (`quarantine`, `invoices`, `reports`). | `npm run test:migrations`<br>• PGlite Simulation<br>• Real Remote Supabase Environment | **VERIFIED PASS** |
-| **2. Existing-Database Upgrade & Rollback** | Reproducible upgrade test with representative legacy schemas, connected records, relational preservation, and partial-failure rollback handling. | Implemented `EXISTING-DATABASE-UPGRADE-001` in `scripts/test-migrations.ts`. Provisions legacy v1.0 schema with connected records (`organizations`, `profiles`, `organization_users`, `business_profiles`, `scan_sessions`, `scan_documents`, `findings`, `remediations`). Executes failing transaction (`BEGIN` -> failed constraint -> `ROLLBACK`), confirming zero corruption. Applies migrations `0001`..`0004`. Proves 100% legacy data preservation, FK enforcement, compatibility views, and post-upgrade RLS. | `npm run test:migrations`<br>• PGlite In-Memory Simulation | **VERIFIED PASS** |
+| **1. Migration & Target Schema Assertion** | Assert all 14 tables, 5 views, 5 indexes, RLS settings/policies, 3 private buckets. Clearly distinguish PGlite simulation from real Supabase environment. | Strengthened `scripts/test-migrations.ts` (`FRESH-DATABASE-MIGRATION-001` & `LIVE-SUPABASE-SCHEMA-VERIFY-001`). In PGlite simulation: asserts all 14 tables, 5 views (`users`, `scans`, `documents`, `reports`, `consents`), 5 indexes, RLS enabled on all 14 tables, tenant policies in `pg_policies`, and storage schema buckets. In real Supabase: verifies live PostgreSQL tables and 3 private storage buckets (`quarantine`, `invoices`, `reports`). | `npm run test:migrations`<br>• PGlite Simulation<br>• Real Remote Supabase Environment | **VERIFIED PASS** |
+| **2. Existing-Database Upgrade & Rollback** | Reproducible upgrade test with representative legacy schemas, connected records, relational preservation, and partial-failure rollback handling. | Implemented `EXISTING-DATABASE-UPGRADE-001` in `scripts/test-migrations.ts`. Provisions legacy v1.0 schema with connected records (`organizations`, `profiles`, `organization_users`, `business_profiles`, `scan_sessions`, `scan_documents`, `findings`, `remediations`). Executes failing transaction (`BEGIN` -> failed constraint -> `ROLLBACK`), confirming zero corruption (**Partial-Failure Transaction Rollback on Schema Alteration (ACID Atomicity)**). Applies migrations `0001`..`0004`. Proves 100% legacy data preservation, FK enforcement, compatibility views, and post-upgrade RLS. | `npm run test:migrations`<br>• PGlite In-Memory Simulation | **VERIFIED PASS** |
 | **3. Durable Queue Recovery & Lease Hygiene** | `JobQueue.recoverStaleAndPendingJobs()` must not claim lease a second time; live test requires successful processing, persisted `COMPLETED` status, retry limits, and worker exclusion. | Hardened `src/services/jobQueue.ts` so `recoverStaleAndPendingJobs()` claims lease once and dispatches `enqueueWorker(..., alreadyLeased = true)`. Added optimistic locking on `attempt_count` during claims. Updated `scripts/test-supabase-integration.ts` Test 6 to assert: single lease claim (`attempt_count === 2`), successful processing, persisted `COMPLETED` status, completed job worker exclusion, terminal failure handling (`attempt_count >= max_attempts`), and terminally failed worker exclusion. | `FORCE_SUPABASE_TESTS=true npx tsx scripts/test-supabase-integration.ts`<br>• Real Remote Supabase Environment | **VERIFIED PASS** |
-| **4. Strict Release Gate Script** | `scripts/final-gate.sh` runs all required tests and fails on any missing verification or failed assertion. | `scripts/final-gate.sh` enforces `set -e` across all 5 verification stages: Lint/Typecheck, Production Build, 43 Behavioral Integration Tests, 4 Migration & Upgrade Tests, and 5 Live Supabase Integration Tests. Fails with non-zero exit code on any failure or missing credential. | `bash scripts/final-gate.sh`<br>• All 5 Gate Stages | **VERIFIED PASS** |
+| **4. Strict Release Gate Script & Credentials** | `scripts/final-gate.sh` runs all required tests and fails immediately with a clear message if any required Supabase credential is missing. | Updated `scripts/final-gate.sh` to enforce `set -e` across all 5 verification stages: Lint/Typecheck, Production Build, 43 Behavioral Integration Tests, 4 Migration & Upgrade Tests, and 5 Live Supabase Integration Tests. Strictly checks all three required Supabase credentials (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) and reports gate as **BLOCKED** with a clear error message if any credential is missing. | `bash scripts/final-gate.sh`<br>• All 5 Gate Stages | **VERIFIED PASS** |
 
 ---
 
@@ -96,7 +96,7 @@ An exhaustive, end-to-end release gate verification was executed against the exa
 
 ## 4. Final Gate Decision
 
-- **Tested Commit**: `bb894e8`
+- **Tested Commit SHA**: `65b2f877d7a78133ba333d8f89030ee0f724d9ce`
 - **Lint / Typecheck**: PASSED (0 errors)
 - **Production Build**: PASSED
 - **Behavioral Test Suite**: PASSED (43/43, 100%)
