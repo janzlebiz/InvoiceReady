@@ -40,6 +40,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     if (!isConfigured) {
+      setProfile({
+        id: 'usr_dev_analyst',
+        email: 'analyst@invoiceready.internal',
+        fullName: 'Compliance Analyst',
+        role: 'OWNER',
+        defaultOrganizationId: 'org_dev_default',
+      });
       setLoading(false);
       return;
     }

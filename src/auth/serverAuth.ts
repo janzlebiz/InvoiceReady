@@ -27,15 +27,32 @@ export class AuthError extends Error {
  */
 export async function verifyServerAuth(req: NextRequest): Promise<ServerAuthContext> {
   const authHeader = req.headers.get('authorization');
+
+  if (!isSupabaseConfigured()) {
+    if (process.env.NODE_ENV === 'development') {
+      const { DatabaseService } = await import('../db/postgres');
+      const devTenant = await DatabaseService.resolveUserAndTenant(
+        'usr_dev_analyst',
+        'analyst@invoiceready.internal',
+        'Compliance Analyst',
+        { allowAutoOrgCreation: true }
+      );
+      const requestedOrgId = req.headers.get('x-organization-id');
+      return {
+        userId: devTenant.userId,
+        email: devTenant.email,
+        organizationId: requestedOrgId || devTenant.organizationId,
+        role: 'OWNER',
+      };
+    }
+    throw new AuthError('Unauthorized: Supabase authentication service is not configured.', 401);
+  }
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new AuthError('Unauthorized: Missing or malformed Authorization Bearer token.', 401);
   }
 
   const token = authHeader.substring(7);
-
-  if (!isSupabaseConfigured()) {
-    throw new AuthError('Unauthorized: Supabase authentication service is not configured.', 401);
-  }
 
   const supabase = getSupabase();
   const { data: { user }, error: userError } = await supabase.auth.getUser(token);

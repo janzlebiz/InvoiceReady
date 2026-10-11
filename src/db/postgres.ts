@@ -656,12 +656,15 @@ export class DatabaseService {
     await this.initialize();
     const res = await this.client!.query(
       `SELECT * FROM job_queue
-       WHERE attempt_count < max_attempts
-         AND (
-           (status = 'QUEUED' AND (next_retry_at IS NULL OR next_retry_at <= NOW()))
-           OR (status = 'PROCESSING' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
-           OR (status = 'FAILED' AND next_retry_at IS NOT NULL AND next_retry_at <= NOW())
-         )
+       WHERE (attempt_count >= max_attempts AND status != 'FAILED')
+          OR (
+            attempt_count < max_attempts
+            AND (
+              (status = 'QUEUED' AND (next_retry_at IS NULL OR next_retry_at <= NOW()))
+              OR (status = 'PROCESSING' AND (lease_expires_at IS NULL OR lease_expires_at < NOW()))
+              OR (status = 'FAILED' AND next_retry_at IS NOT NULL AND next_retry_at <= NOW())
+            )
+          )
        ORDER BY created_at ASC
        LIMIT 10`
     );

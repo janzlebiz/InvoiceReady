@@ -64,9 +64,9 @@ async function runMigrationTests() {
   let overallPassed = true;
 
   // -------------------------------------------------------------------------
-  // TEST 1: Fresh-Database Scratch Migration [PGlite Simulation]
+  // TEST 1: Fresh-Database Scratch Migration [PGlite Local Simulation]
   // -------------------------------------------------------------------------
-  console.log('\n[1/4] [PGlite Local Memory Engine] Fresh-Database Scratch Migration Test...');
+  console.log('\n[1/4] [PGlite Local Simulation] Fresh-Database Scratch Migration Test...');
   try {
     const freshDb = new PGlite();
 
@@ -96,7 +96,7 @@ async function runMigrationTests() {
       if (res.rows.length === 0) missingIndexes.push(idx);
     }
 
-    // Assert RLS Enabled on Tenant Tables
+    // Assert RLS Enabled on all 14 Tenant Tables
     const rlsRes = await freshDb.query(`
       SELECT c.relname
       FROM pg_class c
@@ -106,15 +106,33 @@ async function runMigrationTests() {
     const rlsTables = rlsRes.rows.map((r: any) => r.relname);
     const missingRls = REQUIRED_TABLES.filter(t => !rlsTables.includes(t));
 
-    // Assert RLS Policies
-    const policyRes = await freshDb.query(`SELECT count(*)::int as count FROM pg_policies WHERE schemaname = 'public'`);
-    const policyCount = (policyRes.rows[0] as any).count || 0;
+    // Assert Specific RLS Policies
+    const policyRes = await freshDb.query(`SELECT tablename, policyname FROM pg_policies WHERE schemaname = 'public'`);
+    const policyRows = policyRes.rows as { tablename: string; policyname: string }[];
+    const expectedPolicies = [
+      { table: 'organizations', policy: 'Tenant members can view organizations' },
+      { table: 'profiles', policy: 'Users can view own profile' },
+      { table: 'profiles', policy: 'Users can update own profile' },
+      { table: 'scan_sessions', policy: 'Tenant members can view scan sessions' },
+      { table: 'scan_sessions', policy: 'Tenant analysts and owners can insert scan sessions' },
+      { table: 'scan_documents', policy: 'Tenant members can view scan documents' },
+      { table: 'scan_reports', policy: 'Tenant members can view scan reports' },
+      { table: 'findings', policy: 'Tenant members can view findings' },
+      { table: 'remediations', policy: 'Tenant members can view remediations' },
+      { table: 'job_queue', policy: 'Tenant members can view job queue' },
+      { table: 'audit_logs', policy: 'Admins and owners can read audit logs' },
+    ];
+    const missingPolicies = expectedPolicies.filter(
+      ep => !policyRows.some(pr => pr.tablename === ep.table && pr.policyname === ep.policy)
+    );
 
     // Assert Storage Buckets
-    const bucketRes = await freshDb.query(`SELECT id FROM storage.buckets`);
-    const bucketIds = bucketRes.rows.map((r: any) => r.id);
+    const bucketRes = await freshDb.query(`SELECT id, public FROM storage.buckets`);
+    const buckets = bucketRes.rows as { id: string; public: boolean }[];
+    const bucketIds = buckets.map(b => b.id);
     const requiredBuckets = ['quarantine', 'invoices', 'reports'];
     const missingBuckets = requiredBuckets.filter(b => !bucketIds.includes(b));
+    const publicLeakedBuckets = buckets.filter(b => requiredBuckets.includes(b.id) && b.public);
 
     await freshDb.close();
 
@@ -123,25 +141,26 @@ async function runMigrationTests() {
       missingViews.length === 0 &&
       missingIndexes.length === 0 &&
       missingRls.length === 0 &&
+      missingPolicies.length === 0 &&
       missingBuckets.length === 0 &&
-      policyCount > 0;
+      publicLeakedBuckets.length === 0;
 
     results.push({
       name: 'FRESH-DATABASE-MIGRATION-001',
       passed: freshPass,
-      mode: 'PGlite Local Engine',
+      mode: 'PGlite Simulation (Local In-Memory)',
       details: freshPass
-        ? `Fresh scratch installation succeeded: all ${REQUIRED_TABLES.length} tables, ${REQUIRED_VIEWS.length} views, ${REQUIRED_INDEXES.length} indexes, RLS on all 14 tables (${policyCount} policies), and all 3 storage buckets verified.`
-        : `Fresh migration check failed: missingTables=[${missingTables.join(',')}], missingViews=[${missingViews.join(',')}], missingIdx=[${missingIndexes.join(',')}], missingRls=[${missingRls.join(',')}], missingBuckets=[${missingBuckets.join(',')}]`
+        ? `Fresh scratch installation verified: all ${REQUIRED_TABLES.length} tables, ${REQUIRED_VIEWS.length} views, ${REQUIRED_INDEXES.length} indexes, RLS enabled on all 14 tables, expected tenant security policies, and 3 private storage buckets (quarantine, invoices, reports) confirmed.`
+        : `Fresh migration check failed: missingTables=[${missingTables.join(',')}], missingViews=[${missingViews.join(',')}], missingIdx=[${missingIndexes.join(',')}], missingRls=[${missingRls.join(',')}], missingPol=[${missingPolicies.map(p => p.policy).join(',')}], missingBuckets=[${missingBuckets.join(',')}]`
     });
-    console.log(`  ✓ Scratch Migration (PGlite): ${freshPass ? 'PASS' : 'FAIL'}`);
+    console.log(`  ✓ Scratch Migration (PGlite Simulation): ${freshPass ? 'PASS' : 'FAIL'}`);
     if (!freshPass) overallPassed = false;
   } catch (err: any) {
     overallPassed = false;
     results.push({
       name: 'FRESH-DATABASE-MIGRATION-001',
       passed: false,
-      mode: 'PGlite Local Engine',
+      mode: 'PGlite Simulation (Local In-Memory)',
       details: `Fresh migration failed with exception: ${err.message}`
     });
     console.error('  ✗ Fresh Scratch Migration exception:', err);
@@ -150,7 +169,7 @@ async function runMigrationTests() {
   // -------------------------------------------------------------------------
   // TEST 2: Existing-Database Upgrade with Legacy Data & Partial Failure Rollback
   // -------------------------------------------------------------------------
-  console.log('\n[2/4] [PGlite Local Memory Engine] Upgrade Test (Legacy Schema, Connected Records, Partial Failure Rollback)...');
+  console.log('\n[2/4] [PGlite Local Simulation] Upgrade Test (Legacy Schema, Connected Records, Partial Failure Rollback)...');
   try {
     const upgradeDb = new PGlite();
 
@@ -214,9 +233,30 @@ async function runMigrationTests() {
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS public.remediations (
+        remediation_id VARCHAR(64) PRIMARY KEY,
+        organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id),
+        session_id VARCHAR(64) NOT NULL REFERENCES public.scan_sessions(session_id),
+        title TEXT,
+        description TEXT,
+        priority VARCHAR(16) DEFAULT 'HIGH',
+        category VARCHAR(32) DEFAULT 'TECHNICAL',
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.business_profiles (
+        profile_id VARCHAR(64) PRIMARY KEY,
+        organization_id VARCHAR(64) NOT NULL REFERENCES public.organizations(organization_id),
+        business_name VARCHAR(255) NOT NULL,
+        tax_identifier VARCHAR(64) NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
     `);
 
-    // 2.2 Seed representative connected legacy records
+    // 2.2 Seed representative connected legacy records across all tables
     await upgradeDb.exec(`
       INSERT INTO public.organizations (organization_id, name, country_code)
       VALUES ('org_legacy_001', 'Legacy Trading FZE', 'AE');
@@ -227,6 +267,9 @@ async function runMigrationTests() {
       INSERT INTO public.organization_users (id, organization_id, user_id)
       VALUES ('mem_legacy_001', 'org_legacy_001', 'usr_legacy_001');
 
+      INSERT INTO public.business_profiles (profile_id, organization_id, business_name, tax_identifier)
+      VALUES ('bp_legacy_001', 'org_legacy_001', 'Legacy Trading FZE', 'AE100200300');
+
       INSERT INTO public.scan_sessions (session_id, organization_id, jurisdiction, status, business_profile)
       VALUES ('scan_legacy_001', 'org_legacy_001', 'AE', 'COMPLETED', '{"business_name": "Legacy Trading FZE"}');
 
@@ -235,6 +278,9 @@ async function runMigrationTests() {
 
       INSERT INTO public.findings (finding_id, organization_id, session_id, rule_id, severity, title, description)
       VALUES ('find_legacy_001', 'org_legacy_001', 'scan_legacy_001', 'AE-2026-INV-001', 'CRITICAL', 'Legacy Finding', 'Legacy Description');
+
+      INSERT INTO public.remediations (remediation_id, organization_id, session_id, title, description)
+      VALUES ('rem_legacy_001', 'org_legacy_001', 'scan_legacy_001', 'Configure E-Invoicing ASP', 'Select and integrate certified ASP');
     `);
 
     // 2.3 Partial Failure & Transaction Rollback Test
@@ -244,7 +290,7 @@ async function runMigrationTests() {
       await upgradeDb.exec(`
         BEGIN;
         ALTER TABLE public.organizations ADD COLUMN test_fail VARCHAR(10);
-        INSERT INTO public.organizations (organization_id, name) VALUES (NULL, NULL); -- Will fail
+        INSERT INTO public.organizations (organization_id, name) VALUES (NULL, NULL); -- Will fail NOT NULL constraint
         COMMIT;
       `);
     } catch (partErr) {
@@ -259,51 +305,93 @@ async function runMigrationTests() {
       await upgradeDb.exec(m.sql);
     }
 
-    // 2.5 Verify relational data preservation post-upgrade
+    // 2.5 Verify relational data preservation and foreign key relationships post-upgrade
     const orgCheck = await upgradeDb.query(`SELECT organization_id, name, created_by FROM public.organizations WHERE organization_id = 'org_legacy_001'`);
+    const profCheck = await upgradeDb.query(`SELECT id, email, full_name FROM public.profiles WHERE id = 'usr_legacy_001'`);
+    const memCheck = await upgradeDb.query(`SELECT id, organization_id, user_id FROM public.organization_users WHERE id = 'mem_legacy_001'`);
+    const bpCheck = await upgradeDb.query(`SELECT profile_id, organization_id, business_name FROM public.business_profiles WHERE profile_id = 'bp_legacy_001'`);
     const scanCheck = await upgradeDb.query(`SELECT session_id, organization_id, jurisdiction, status FROM public.scan_sessions WHERE session_id = 'scan_legacy_001'`);
-    const docCheck = await upgradeDb.query(`SELECT document_id, session_id FROM public.scan_documents WHERE document_id = 'doc_legacy_001'`);
-    const findCheck = await upgradeDb.query(`SELECT finding_id, session_id, rule_id FROM public.findings WHERE finding_id = 'find_legacy_001'`);
+    const docCheck = await upgradeDb.query(`SELECT document_id, session_id, organization_id FROM public.scan_documents WHERE document_id = 'doc_legacy_001'`);
+    const findCheck = await upgradeDb.query(`SELECT finding_id, session_id, organization_id, rule_id FROM public.findings WHERE finding_id = 'find_legacy_001'`);
+    const remCheck = await upgradeDb.query(`SELECT remediation_id, session_id, organization_id FROM public.remediations WHERE remediation_id = 'rem_legacy_001'`);
 
     const dataPreserved =
       orgCheck.rows.length === 1 &&
+      profCheck.rows.length === 1 &&
+      memCheck.rows.length === 1 &&
+      bpCheck.rows.length === 1 &&
       scanCheck.rows.length === 1 &&
       docCheck.rows.length === 1 &&
       findCheck.rows.length === 1 &&
-      (findCheck.rows[0] as any).session_id === 'scan_legacy_001';
+      remCheck.rows.length === 1 &&
+      (memCheck.rows[0] as any).organization_id === 'org_legacy_001' &&
+      (memCheck.rows[0] as any).user_id === 'usr_legacy_001' &&
+      (findCheck.rows[0] as any).session_id === 'scan_legacy_001' &&
+      (docCheck.rows[0] as any).session_id === 'scan_legacy_001' &&
+      (remCheck.rows[0] as any).session_id === 'scan_legacy_001';
 
-    // 2.6 Verify new schema additions (job_queue table, views)
-    const newTableCheck = await upgradeDb.query(`SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'job_queue'`);
-    const upgradeComplete = newTableCheck.rows.length === 1;
+    // 2.6 Verify compatibility views successfully expose legacy records
+    const viewScansCheck = await upgradeDb.query(`SELECT scan_id, organization_id FROM public.scans WHERE scan_id = 'scan_legacy_001'`);
+    const viewUsersCheck = await upgradeDb.query(`SELECT user_id, email FROM public.users WHERE user_id = 'usr_legacy_001'`);
+    const viewDocsCheck = await upgradeDb.query(`SELECT document_id, scan_id FROM public.documents WHERE document_id = 'doc_legacy_001'`);
+    const viewsWorking = viewScansCheck.rows.length === 1 && viewUsersCheck.rows.length === 1 && viewDocsCheck.rows.length === 1;
+
+    // 2.7 Verify foreign key enforcement is active post-upgrade (reject orphan records)
+    let fkEnforced = false;
+    try {
+      await upgradeDb.exec(`
+        INSERT INTO public.scan_documents (document_id, organization_id, session_id, file_name, storage_path)
+        VALUES ('doc_orphan_001', 'nonexistent_org', 'nonexistent_scan', 'orphan.pdf', 'path/orphan.pdf');
+      `);
+    } catch (_) {
+      fkEnforced = true;
+    }
+
+    // 2.8 Verify new schema additions (all 14 tables present post-upgrade)
+    let allTablesPresent = true;
+    for (const t of REQUIRED_TABLES) {
+      const res = await upgradeDb.query(`SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '${t}'`);
+      if (res.rows.length === 0) allTablesPresent = false;
+    }
+
+    // 2.9 Verify RLS enabled on all 14 tables post-upgrade
+    const upgradeRlsRes = await upgradeDb.query(`
+      SELECT c.relname
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity = true
+    `);
+    const upgradeRlsTables = upgradeRlsRes.rows.map((r: any) => r.relname);
+    const rlsPreserved = REQUIRED_TABLES.every(t => upgradeRlsTables.includes(t));
 
     await upgradeDb.close();
 
-    const upgradePass = partialFailureRolledBack && dataPreserved && upgradeComplete;
+    const upgradePass = partialFailureRolledBack && dataPreserved && viewsWorking && fkEnforced && allTablesPresent && rlsPreserved;
     results.push({
       name: 'EXISTING-DATABASE-UPGRADE-001',
       passed: upgradePass,
-      mode: 'PGlite Local Engine',
+      mode: 'PGlite Simulation (Local In-Memory)',
       details: upgradePass
-        ? 'Upgrade migration cleanly applied over legacy schema; partial-failure transaction rollback verified; 100% of connected legacy records and relationships preserved.'
-        : `Upgrade failed: partialFailureRolledBack=${partialFailureRolledBack}, dataPreserved=${dataPreserved}, upgradeComplete=${upgradeComplete}`
+        ? 'Upgrade migration cleanly applied over legacy schema; partial-failure transaction rollback verified; 100% of connected legacy records, relationships, FK constraints, compatibility views, and RLS settings preserved.'
+        : `Upgrade failed: partialFailureRolledBack=${partialFailureRolledBack}, dataPreserved=${dataPreserved}, viewsWorking=${viewsWorking}, fkEnforced=${fkEnforced}, allTablesPresent=${allTablesPresent}, rlsPreserved=${rlsPreserved}`
     });
-    console.log(`  ✓ Existing-Database Upgrade (PGlite): ${upgradePass ? 'PASS' : 'FAIL'}`);
+    console.log(`  ✓ Existing-Database Upgrade (PGlite Simulation): ${upgradePass ? 'PASS' : 'FAIL'}`);
     if (!upgradePass) overallPassed = false;
   } catch (err: any) {
     overallPassed = false;
     results.push({
       name: 'EXISTING-DATABASE-UPGRADE-001',
       passed: false,
-      mode: 'PGlite Local Engine',
+      mode: 'PGlite Simulation (Local In-Memory)',
       details: `Upgrade migration failed with exception: ${err.message}`
     });
     console.error('  ✗ Upgrade Migration exception:', err);
   }
 
   // -------------------------------------------------------------------------
-  // TEST 3: Migration Repeatability & Idempotency [PGlite Simulation]
+  // TEST 3: Migration Repeatability & Idempotency [PGlite Local Simulation]
   // -------------------------------------------------------------------------
-  console.log('\n[3/4] [PGlite Local Memory Engine] Migration Repeatability & Idempotency Test...');
+  console.log('\n[3/4] [PGlite Local Simulation] Migration Repeatability & Idempotency Test...');
   try {
     const repeatDb = new PGlite();
 
@@ -328,27 +416,29 @@ async function runMigrationTests() {
     results.push({
       name: 'MIGRATION-REPEATABILITY-001',
       passed: reExecutionPassed,
-      mode: 'PGlite Local Engine',
+      mode: 'PGlite Simulation (Local In-Memory)',
       details: reExecutionPassed
-        ? 'Versioned migration scripts are 100% idempotent and can be re-executed consecutively without errors.'
+        ? 'Versioned migration scripts (0001..0004) are 100% idempotent and can be re-executed consecutively without errors or drift.'
         : 'Migration scripts threw errors on second consecutive run.'
     });
-    console.log(`  ✓ Migration Repeatability (PGlite): ${reExecutionPassed ? 'PASS' : 'FAIL'}`);
+    console.log(`  ✓ Migration Repeatability (PGlite Simulation): ${reExecutionPassed ? 'PASS' : 'FAIL'}`);
     if (!reExecutionPassed) overallPassed = false;
   } catch (err: any) {
     overallPassed = false;
     results.push({
       name: 'MIGRATION-REPEATABILITY-001',
       passed: false,
-      mode: 'PGlite Local Engine',
+      mode: 'PGlite Simulation (Local In-Memory)',
       details: `Repeatability test failed with exception: ${err.message}`
     });
   }
 
   // -------------------------------------------------------------------------
-  // TEST 4: Real Supabase PostgreSQL Target Schema Verification
+  // TEST 4: Real Supabase PostgreSQL Target Schema Verification [Live Production]
   // -------------------------------------------------------------------------
-  console.log('\n[4/4] [Supabase Real PostgreSQL Environment] Target Schema Verification...');
+  console.log('\n[4/4] [Real Supabase PostgreSQL Environment] Target Schema & Storage Verification...');
+  console.log('  Note: PGlite simulation validates full SQL DDL, catalogs (pg_class, pg_indexes, pg_policies), views, and rollback semantics.');
+  console.log('  Live Supabase verification validates deployed remote PostgreSQL tables and private storage infrastructure over network.');
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -368,17 +458,28 @@ async function runMigrationTests() {
       }
 
       const { data: buckets, error: bErr } = await adminClient.storage.listBuckets();
-      const bucketNames = (buckets || []).map(b => b.name);
-      const liveBucketsValid = !bErr && ['quarantine', 'invoices', 'reports'].every(b => bucketNames.includes(b));
+      let liveBucketsValid = false;
+      if (bErr || !buckets) {
+        console.error(`  ✗ Storage buckets listing failed: ${bErr?.message}`);
+      } else {
+        const bucketNames = buckets.map(b => b.name);
+        const requiredBuckets = ['quarantine', 'invoices', 'reports'];
+        const missingBuckets = requiredBuckets.filter(b => !bucketNames.includes(b));
+        const publicBuckets = buckets.filter(b => b.public && requiredBuckets.includes(b.name));
+        liveBucketsValid = missingBuckets.length === 0 && publicBuckets.length === 0;
+        if (!liveBucketsValid) {
+          console.error(`  ✗ Live buckets invalid. Missing: [${missingBuckets.join(',')}], Leaked public: [${publicBuckets.map(b => b.name).join(',')}]`);
+        }
+      }
 
       const livePass = liveTablesValid && liveBucketsValid;
       results.push({
         name: 'LIVE-SUPABASE-SCHEMA-VERIFY-001',
         passed: livePass,
-        mode: 'Supabase Real PostgreSQL',
+        mode: 'Real Supabase PostgreSQL Environment (Remote Live)',
         details: livePass
-          ? `Verified against real remote Supabase PostgreSQL instance (${new URL(supabaseUrl).hostname}): all 14 tables active and all 3 storage buckets present.`
-          : 'Remote Supabase schema or storage bucket verification failed.'
+          ? `Verified against real remote Supabase PostgreSQL instance (${new URL(supabaseUrl).hostname}): all 14 authoritative tables active (${REQUIRED_TABLES.join(', ')}), and all 3 private storage buckets (quarantine, invoices, reports) verified.`
+          : `Remote Supabase verification failed: tables=${liveTablesValid}, buckets=${liveBucketsValid}`
       });
       console.log(`  ✓ Live Supabase Target Schema Verification: ${livePass ? 'PASS' : 'FAIL'}`);
       if (!livePass) overallPassed = false;
@@ -387,12 +488,19 @@ async function runMigrationTests() {
       results.push({
         name: 'LIVE-SUPABASE-SCHEMA-VERIFY-001',
         passed: false,
-        mode: 'Supabase Real PostgreSQL',
+        mode: 'Real Supabase PostgreSQL Environment (Remote Live)',
         details: `Live Supabase schema verification threw exception: ${liveErr.message}`
       });
     }
   } else {
-    console.log('  ⚠️ Skipping Live Supabase verification: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing in environment.');
+    overallPassed = false;
+    results.push({
+      name: 'LIVE-SUPABASE-SCHEMA-VERIFY-001',
+      passed: false,
+      mode: 'Real Supabase PostgreSQL Environment (Remote Live)',
+      details: 'FAIL-CLOSED: Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Production verification cannot proceed without live database credentials.'
+    });
+    console.error('  ✗ Failing Live Supabase verification: NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY missing in environment.');
   }
 
   // -------------------------------------------------------------------------
