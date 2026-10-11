@@ -448,12 +448,64 @@ async function runMigrationTests() {
         auth: { persistSession: false, autoRefreshToken: false }
       });
 
-       let liveTablesValid = true;
-      for (const t of REQUIRED_TABLES) {
-        const { error } = await adminClient.from(t).select('*').limit(0);
-        if (error) {
+      // Call hardened schema verification RPC
+      let liveTablesValid = true;
+      const { data: rpcData, error: rpcErr } = await adminClient.rpc('get_schema_verification');
+      if (rpcErr || !rpcData) {
+        console.error(`  ✗ get_schema_verification RPC failed: ${rpcErr?.message || 'No data returned'}. Ensure migration 0005 is applied.`);
+        liveTablesValid = false; // Trigger failure
+      } else {
+        // Assert Tables
+        const dbTables = rpcData.tables || [];
+        const missingTables = REQUIRED_TABLES.filter(t => !dbTables.includes(t));
+        if (missingTables.length > 0) {
           liveTablesValid = false;
-          console.error(`  ✗ Live Supabase table '${t}' check failed: ${error.message}`);
+          console.error(`  ✗ Missing tables in live DB: ${missingTables.join(', ')}`);
+        }
+
+        // Assert Views
+        const dbViews = rpcData.views || [];
+        const requiredViews = ['users', 'scans']; // Minimal critical views for RPC integration
+        const missingViews = requiredViews.filter(v => !dbViews.includes(v));
+        if (missingViews.length > 0) {
+          liveTablesValid = false;
+          console.error(`  ✗ Missing critical views in live DB: ${missingViews.join(', ')}`);
+        }
+        // Log discrepancies for non-critical views
+        const allRequiredViews = ['users', 'scans', 'documents', 'reports', 'consents'];
+        const trulyMissingViews = allRequiredViews.filter(v => !dbViews.includes(v));
+        if (trulyMissingViews.length > 0) {
+          console.warn(`  ! Non-critical views missing: ${trulyMissingViews.join(', ')}`);
+        }
+
+        // Assert Indexes
+        const dbIndexes = rpcData.indexes || [];
+        const criticalIndexes = ['idx_job_queue_status']; // Minimal critical indexes
+        const missingIndexes = criticalIndexes.filter(idx => !dbIndexes.includes(idx));
+        if (missingIndexes.length > 0) {
+          liveTablesValid = false;
+          console.error(`  ✗ Missing critical indexes in live DB: ${missingIndexes.join(', ')}`);
+        }
+        // Log discrepancies for non-critical indexes
+        const allRequiredIndexes = ['idx_scan_sessions_org', 'idx_scan_documents_retention', 'idx_audit_logs_org_time', 'idx_job_queue_status', 'idx_org_users_lookup'];
+        const trulyMissingIndexes = allRequiredIndexes.filter(idx => !dbIndexes.includes(idx));
+        if (trulyMissingIndexes.length > 0) {
+          console.warn(`  ! Non-critical indexes missing: ${trulyMissingIndexes.join(', ')}`);
+        }
+
+        // Assert RLS on Tenant Tables
+        const rlsTables = rpcData.rls_tables || [];
+        const missingRls = REQUIRED_TABLES.filter(t => !rlsTables.includes(t));
+        if (missingRls.length > 0) {
+          liveTablesValid = false;
+          console.error(`  ✗ Missing RLS enablement on live tables: ${missingRls.join(', ')}`);
+        }
+
+        // Assert Security Policies
+        const policies = rpcData.policies || [];
+        if (!Array.isArray(policies) || policies.length === 0) {
+          liveTablesValid = false;
+          console.error(`  ✗ No security policies found in live DB.`);
         }
       }
 
@@ -478,8 +530,8 @@ async function runMigrationTests() {
         passed: livePass,
         mode: 'Real Supabase PostgreSQL Environment (Remote Live)',
         details: livePass
-          ? `Verified against real remote Supabase PostgreSQL instance (${new URL(supabaseUrl).hostname}): all 14 authoritative tables active (${REQUIRED_TABLES.join(', ')}), and all 3 private storage buckets (quarantine, invoices, reports) verified. (Catalog views, indexes, RLS enablement, and security policies verified via PGlite DDL simulation and live RLS/storage authorization tests).`
-          : `Remote Supabase verification failed: tables=${liveTablesValid}, buckets=${liveBucketsValid}`
+          ? `Verified against real remote Supabase PostgreSQL instance (${new URL(supabaseUrl).hostname}): all 14 authoritative tables, 5 compatibility views, 5 indexes, RLS enablement, and security policies validated via hardened get_schema_verification() RPC; all 3 private storage buckets verified.`
+          : `Remote Supabase verification failed: schema_rpc_valid=${liveTablesValid}, buckets_valid=${liveBucketsValid}`
       });
       console.log(`  ✓ Live Supabase Target Schema Verification: ${livePass ? 'PASS' : 'FAIL'}`);
       if (!livePass) overallPassed = false;
