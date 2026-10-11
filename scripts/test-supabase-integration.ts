@@ -459,24 +459,141 @@ async function runLiveSupabaseSuite() {
       }
     }
 
-    if (cleanupFailures.length > 0) {
-      console.error(`  ✗ Teardown FAILED with ${cleanupFailures.length} cleanup error(s):`);
-      for (const fail of cleanupFailures) {
-        console.error(`    - ${fail}`);
+    // -------------------------------------------------------------------------
+    // INDEPENDENT VERIFICATION: Query for Residual Artifacts
+    // -------------------------------------------------------------------------
+    console.log('[Teardown] Independently verifying zero residual test artifacts...');
+    const residualArtifacts: string[] = [];
+
+    // Verify storage files are absent
+    for (const f of cleanupFiles) {
+      try {
+        const { data: fileData } = await adminClient.storage.from(f.bucket).download(f.path);
+        if (fileData) {
+          residualArtifacts.push(`Residual storage object remaining: ${f.bucket}/${f.path}`);
+        }
+      } catch (_) {
+        // Expected - file does not exist
+      }
+    }
+
+    // Verify queue jobs are absent
+    if (cleanupScans.length > 0) {
+      try {
+        const { data: remJobs, error: remJobsErr } = await adminClient
+          .from('job_queue')
+          .select('operation_id, scan_id')
+          .in('scan_id', cleanupScans);
+        if (remJobsErr) {
+          residualArtifacts.push(`Failed to verify residual job_queue: ${remJobsErr.message}`);
+        } else if (remJobs && remJobs.length > 0) {
+          residualArtifacts.push(`Residual job_queue records found: ${remJobs.map((j) => j.operation_id).join(', ')}`);
+        }
+      } catch (err: any) {
+        residualArtifacts.push(`Residual job_queue verification exception: ${err.message}`);
+      }
+    }
+
+    // Verify scan sessions are absent
+    if (cleanupScans.length > 0) {
+      try {
+        const { data: remScans, error: remScansErr } = await adminClient
+          .from('scan_sessions')
+          .select('session_id')
+          .in('session_id', cleanupScans);
+        if (remScansErr) {
+          residualArtifacts.push(`Failed to verify residual scan_sessions: ${remScansErr.message}`);
+        } else if (remScans && remScans.length > 0) {
+          residualArtifacts.push(`Residual scan_sessions records found: ${remScans.map((s) => s.session_id).join(', ')}`);
+        }
+      } catch (err: any) {
+        residualArtifacts.push(`Residual scan_sessions verification exception: ${err.message}`);
+      }
+    }
+
+    // Verify organization_users are absent
+    if (cleanupOrgs.length > 0) {
+      try {
+        const { data: remOrgUsers, error: remOrgUsersErr } = await adminClient
+          .from('organization_users')
+          .select('id, organization_id, user_id')
+          .in('organization_id', cleanupOrgs);
+        if (remOrgUsersErr) {
+          residualArtifacts.push(`Failed to verify residual organization_users: ${remOrgUsersErr.message}`);
+        } else if (remOrgUsers && remOrgUsers.length > 0) {
+          residualArtifacts.push(`Residual organization_users records found: ${remOrgUsers.map((ou) => `${ou.organization_id}:${ou.user_id}`).join(', ')}`);
+        }
+      } catch (err: any) {
+        residualArtifacts.push(`Residual organization_users verification exception: ${err.message}`);
+      }
+    }
+
+    // Verify organizations are absent
+    if (cleanupOrgs.length > 0) {
+      try {
+        const { data: remOrgs, error: remOrgsErr } = await adminClient
+          .from('organizations')
+          .select('organization_id')
+          .in('organization_id', cleanupOrgs);
+        if (remOrgsErr) {
+          residualArtifacts.push(`Failed to verify residual organizations: ${remOrgsErr.message}`);
+        } else if (remOrgs && remOrgs.length > 0) {
+          residualArtifacts.push(`Residual organizations records found: ${remOrgs.map((o) => o.organization_id).join(', ')}`);
+        }
+      } catch (err: any) {
+        residualArtifacts.push(`Residual organizations verification exception: ${err.message}`);
+      }
+    }
+
+    // Verify profiles are absent
+    if (cleanupUsers.length > 0) {
+      try {
+        const { data: remProfiles, error: remProfErr } = await adminClient
+          .from('profiles')
+          .select('id')
+          .in('id', cleanupUsers);
+        if (remProfErr) {
+          residualArtifacts.push(`Failed to verify residual profiles: ${remProfErr.message}`);
+        } else if (remProfiles && remProfiles.length > 0) {
+          residualArtifacts.push(`Residual profiles records found: ${remProfiles.map((p) => p.id).join(', ')}`);
+        }
+      } catch (err: any) {
+        residualArtifacts.push(`Residual profiles verification exception: ${err.message}`);
+      }
+    }
+
+    // Verify auth users are absent
+    for (const uid of cleanupUsers) {
+      try {
+        const { data: authUser, error: authUserErr } = await adminClient.auth.admin.getUserById(uid);
+        if (authUser?.user && !authUserErr) {
+          residualArtifacts.push(`Residual auth user exists: ${uid} (${authUser.user.email})`);
+        }
+      } catch (_) {
+        // Expected - user does not exist
+      }
+    }
+
+    const allTeardownIssues = [...cleanupFailures, ...residualArtifacts];
+
+    if (allTeardownIssues.length > 0) {
+      console.error(`  ✗ Teardown verification FAILED with ${allTeardownIssues.length} issue(s):`);
+      for (const issue of allTeardownIssues) {
+        console.error(`    - ${issue}`);
       }
       testResults.push({
         name: 'LIVE-TEARDOWN-CLEANUP-001',
         category: 'DELETION',
         passed: false,
-        details: `Teardown failed: ${cleanupFailures.join('; ')}`,
+        details: `Teardown verification failed: ${allTeardownIssues.join('; ')}`,
       });
     } else {
-      console.log('  ✓ Teardown complete. Zero test debris remaining.');
+      console.log('  ✓ Teardown verified. Zero test debris remaining across all entities.');
       testResults.push({
         name: 'LIVE-TEARDOWN-CLEANUP-001',
         category: 'DELETION',
         passed: true,
-        details: 'Guaranteed zero test debris remaining: all test users, organizations, scan sessions, queue jobs, and storage files completely removed.',
+        details: 'Guaranteed zero test debris remaining: independently verified via queries that all test users, profiles, organizations, scan sessions, queue jobs, and storage files were completely removed.',
       });
     }
   }

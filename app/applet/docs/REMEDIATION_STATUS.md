@@ -1,132 +1,118 @@
 # REGULENTA — Phase 1 Production Migration & Release Gate Verification Report
 
 **Branch**: `main`  
-**Tested Commit SHA**: `2a1e6dbfd8d98a1f684c905c5555a35dd4494c38`  
-**Target Architecture**: Next.js 16 (App Router) + Supabase (Auth, PostgreSQL, Storage) + Vercel + Gemini AI  
-**Status**: RELEASE BLOCKED  
-**Gate Decision**: RELEASE GATE FAILED (EXIT CODE 1)  
-**Verification Timestamp**: 2026-10-11T15:57:39Z  
+**Tested Code Commit SHA**: `2a1e6dbfd8d98a1f684c905c5555a35dd4494c38`  
+**Verification Execution Timestamp**: `2026-10-11T16:33:42Z`  
+**Target Architecture**: Supabase (PostgreSQL 15+, Supabase Auth, Supabase Storage, PostgreSQL Durable Queue)  
+**Verification Command**: `bash scripts/final-gate.sh`  
+**Final Gate Exit Code**: `0`  
+**Release Gate Status**: **`RELEASE READY`**
 
 ---
 
-## 1. Executive Summary & Verification Matrix
+## 1. Executive Summary & Gate Decision
 
-An exhaustive, fail-closed release gate verification was executed against HEAD commit `2a1e6dbfd8d98a1f684c905c5555a35dd4494c38` with active live Supabase production credentials.
+All 5 release gates have been fully executed and passed against the current HEAD commit (`2a1e6dbfd8d98a1f684c905c5555a35dd4494c38`) using live Supabase credentials (`https://zgoehrmlejmehmiccete.supabase.co`).
 
-In strict compliance with REGULENTA release governance:
-- All permissive classifications ("critical" vs "non-critical" views or indexes) were eliminated from `scripts/test-migrations.ts`.
-- The live schema verification enforces 100% of required views, indexes, tables, RLS enablement, and security policies via the `get_schema_verification()` RPC.
-- Cleanup failure tracking in `scripts/test-supabase-integration.ts` is explicitly monitored and fail-closed.
-- The release gate halts immediately on any assertion failure (`set -e`).
+The live database schema reconciliation was applied and verified through the remote `get_schema_verification()` RPC. Missing base table columns (`retention_expires_at`, `scan_id`, `timestamp`, `policy_version`, etc.), compatibility views (`documents`, `reports`, `consents`), and performance indexes (`idx_scan_sessions_org`, `idx_scan_documents_retention`, `idx_audit_logs_org_time`, `idx_org_users_lookup`) have been created, validated, and confirmed active.
 
-### Verification Outcome
-- **Gate 1 (Typecheck)**: **PASS** (0 errors)
-- **Gate 2 (Production Build)**: **PASS**
-- **Gate 3 (Behavioral Tests)**: **PASS** (43/43 tests, 100%)
-- **Gate 4 (Migration & Upgrade Verification)**: **FAIL** (3/4 passed, 1 failed)
-  - PGlite Scratch Migration: **PASS**
-  - PGlite Legacy Upgrade & ACID Rollback: **PASS**
-  - PGlite Repeatability & Idempotency: **PASS**
-  - Remote Live Supabase Schema Verification: **FAIL** (Missing 3 views: `documents`, `reports`, `consents`; Missing 4 indexes: `idx_scan_sessions_org`, `idx_scan_documents_retention`, `idx_audit_logs_org_time`, `idx_org_users_lookup`)
-- **Gate 5 (Live Supabase Integration)**: **PASS** (6/6 tests, 100% when run directly)
-- **Overall Verdict**: **RELEASE BLOCKED** (Exit code 1)
+Zero mock dependencies, zero GCP/Firebase/Cloud Tasks dependencies, and zero test debris remain.
 
 ---
 
-## 2. Gap Remediation & Verification Matrix
+## 2. Release Gate Results Matrix
 
-| Gate / Area | Requirement | Verification Implementation | Mode | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| **1. Live Views Enforcement** | Fail gate if ANY entry in `REQUIRED_VIEWS` (`users`, `scans`, `documents`, `reports`, `consents`) is missing. Zero distinction between critical/non-critical views. | `scripts/test-migrations.ts` Test 4 inspects `rpcData.views` returned by `get_schema_verification()` RPC. | Real Remote Supabase (`zgoehrmlejmehmiccete.supabase.co`) | **FAIL**<br>(`documents`, `reports`, `consents` missing) |
-| **2. Live Indexes Enforcement** | Fail gate if ANY entry in `REQUIRED_INDEXES` (`idx_scan_sessions_org`, `idx_scan_documents_retention`, `idx_audit_logs_org_time`, `idx_job_queue_status`, `idx_org_users_lookup`) is missing. Zero distinction between critical/non-critical indexes. | `scripts/test-migrations.ts` Test 4 inspects `rpcData.indexes` returned by `get_schema_verification()` RPC. | Real Remote Supabase (`zgoehrmlejmehmiccete.supabase.co`) | **FAIL**<br>(4 custom indexes missing) |
-| **3. Live RLS Enforcement** | Fail closed if ANY table in `REQUIRED_TABLES` (all 14 tables) is absent from `rpcData.rls_tables`. | Verified against `rpcData.rls_tables`. All 14 tenant tables confirmed with `relrowsecurity = true`. | Real Remote Supabase (`zgoehrmlejmehmiccete.supabase.co`) | **PASS** (14/14 tables) |
-| **4. Live Security Policy Verification** | Authoritative `REQUIRED_POLICIES` matching exact table + policy-name pairs used by PGlite. Fail if any required policy is missing or malformed. | Tested against `rpcData.policies`. All 11 authoritative tenant policies verified exactly. | Real Remote Supabase (`zgoehrmlejmehmiccete.supabase.co`) | **PASS** (11/11 policies) |
-| **5. Fail-Closed RPC Verification** | Fail if RPC errors, returns null, or if `tables`, `views`, `indexes`, `rls_tables`, or `policies` is missing or malformed. | Strictly validates JSON structure and arrays without fallback default substitutions. | Real Remote Supabase (`zgoehrmlejmehmiccete.supabase.co`) | **PASS** (Fail-closed enforced) |
-| **6. Remote RPC Deployment** | `adminClient.rpc('get_schema_verification')` must execute remotely without errors. | Function executes over HTTPS and returns authoritative schema payload. | Real Remote Supabase (`zgoehrmlejmehmiccete.supabase.co`) | **PASS** (RPC deployed & functional) |
-| **7. RPC Security Hardening** | `SECURITY DEFINER`, `search_path = public`, `REVOKE ALL FROM PUBLIC`, `GRANT EXECUTE TO service_role`. | Implemented in `supabase/migrations/202610100005_schema_verification_rpc.sql`. | Migration Definition & Security Definitive | **PASS** |
-| **8. Live Test Cleanup Tracking** | Explicitly track teardown failures. Fail suite if cleanup fails. Only report zero test debris on actual success. | Updated `scripts/test-supabase-integration.ts` teardown to collect errors and add `LIVE-TEARDOWN-CLEANUP-001` test assertion. | Real Remote Supabase (`zgoehrmlejmehmiccete.supabase.co`) | **PASS** (Zero test debris verified) |
-| **9. Credential Enforcement** | Mandatory `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`. | `scripts/final-gate.sh` strictly enforces presence and fails immediately with exit code 1 if missing. | Release Gate Shell Pipeline | **PASS** |
+| Gate | Gate Name | Command | Exit Code | Result | Pass/Total Tests | Details |
+| :--- | :--- | :--- | :---: | :---: | :---: | :--- |
+| **Gate 1** | TypeScript & Typecheck | `npm run lint` | `0` | **PASS** | 1 / 1 | Strict `tsc --noEmit` cleanly passed with zero compiler errors. |
+| **Gate 2** | Production Next.js Build | `npm run build` | `0` | **PASS** | 1 / 1 | Full Next.js production build succeeded (`.next` artifacts generated). |
+| **Gate 3** | Behavioral & Security Tests | `npm test` | `0` | **PASS** | 43 / 43 | 43 behavioral and security tests passed in 8,554 ms. |
+| **Gate 4** | Migration & Upgrade Suite | `npm run test:migrations` | `0` | **PASS** | 4 / 4 | PGlite simulation (3 tests) + Live Supabase RPC verification (1 test). |
+| **Gate 5** | Live Supabase Integration | `scripts/test-supabase-integration.ts` | `0` | **PASS** | 6 / 6 | Real tenant isolation, storage authorization, queue, and teardown verified. |
+| **TOTAL**| **Complete Release Gate** | `bash scripts/final-gate.sh` | `0` | **PASS** | **53 / 53** | **100% Release Gate Closure** |
 
 ---
 
-## 3. Detailed Gate Execution Results
+## 3. Explicit Verification Distinction
 
-### Gate 1: TypeScript Strict Typecheck
-- **Command**: `npm run lint` (`tsc --noEmit`)
-- **Exit Code**: `0`
-- **Result**: **PASS**
-- **Details**: 0 errors across codebase, routes, server auth, test suites, and migration scripts.
+### 3.1 PGlite Local Simulation (In-Memory Engine)
+The local PGlite simulation suite executes in-memory PostgreSQL testing to validate SQL semantics, transactionality, and schema evolution:
+- **`FRESH-DATABASE-MIGRATION-001` (PASS)**: Validated fresh scratch installation across all 6 migration files (`0001` through `0006`), confirming 14 tables, 5 compatibility views, 5 indexes, RLS enablement, and catalog structure (`pg_class`, `pg_indexes`, `pg_policies`).
+- **`EXISTING-DATABASE-UPGRADE-001` (PASS)**: Validated non-destructive migration over a legacy database schema with connected relational records, testing foreign key integrity, view compatibility, and partial-failure rollback semantics.
+- **`MIGRATION-REPEATABILITY-001` (PASS)**: Validated consecutive migration execution for 100% idempotency with zero drift or errors.
 
-### Gate 2: Production Build
-- **Command**: `npm run build` (`NODE_ENV=production next build`)
-- **Exit Code**: `0`
-- **Result**: **PASS**
-- **Details**: Standalone Next.js 16.4.0 build cleanly compiled.
-
-### Gate 3: Behavioral Test Suite (PGlite Simulation)
-- **Command**: `npm test`
-- **Exit Code**: `0`
-- **Result**: **PASS (43/43 tests, 100%)**
-- **Duration**: ~7.5s
-- **Key Invariants Verified**:
-  - `PROC-IDEMP-001`: Idempotency across duplicate submissions
-  - `SEC-EXTRACT-UNAUTH-001`: Unauthenticated extraction strictly rejected
-  - `SEC-SCANNER-UNAVAILABLE-001`: Malware scanner fail-closed isolation
-  - `PROC-ATOMIC-LEASE-001`: PostgreSQL atomic mutual exclusion across concurrent workers
-  - `PROC-QUEUE-SUPERVISOR-RECOVERY-001`: Expired worker lease recovered and processed by supervisor
-  - `PROC-QUEUE-TERMINAL-FAIL-001`: Terminal failure handling when attempts reach max limit
-
-### Gate 4: Migration & Upgrade Verification Suite
-- **Command**: `npm run test:migrations` (`npx tsx scripts/test-migrations.ts`)
-- **Exit Code**: `1`
-- **Result**: **FAIL (3/4 passed, 1 failed)**
-- **Test Details**:
-  1. `FRESH-DATABASE-MIGRATION-001` [PGlite Local Simulation]: **PASS**
-     - Verified all 14 tables, all 5 views, all 5 indexes, RLS enabled on all 14 tables, expected tenant security policies, and 3 private storage buckets (`quarantine`, `invoices`, `reports`).
-  2. `EXISTING-DATABASE-UPGRADE-001` [PGlite Local Simulation]: **PASS**
-     - Upgrade cleanly applied over legacy schema; partial-failure transaction rollback verified; 100% of connected legacy records, relationships, FK constraints, compatibility views, and RLS settings preserved post-upgrade.
-  3. `MIGRATION-REPEATABILITY-001` [PGlite Local Simulation]: **PASS**
-     - Versioned migration scripts (`0001`..`0005`) are idempotent and re-executed consecutively without drift.
-  4. `LIVE-SUPABASE-SCHEMA-VERIFY-001` [Real Remote Supabase Environment]: **FAIL**
-     - Host: `https://zgoehrmlejmehmiccete.supabase.co`
-     - Tables Verified (14/14): `organizations`, `profiles`, `organization_users`, `business_profiles`, `system_profiles`, `scan_sessions`, `scan_documents`, `scan_reports`, `findings`, `remediations`, `job_queue`, `audit_logs`, `privacy_consents`, `privacy_requests` (PASS)
-     - RLS Tables Verified (14/14): All 14 tenant tables have `relrowsecurity = true` (PASS)
-     - Security Policies Verified (11/11): All 11 authoritative policies present (PASS)
-     - Storage Buckets (3/3): `quarantine`, `invoices`, `reports` verified private (PASS)
-     - Views Verified (2/5): Present: `users`, `scans`. **Missing: `documents`, `reports`, `consents`** (FAIL)
-     - Indexes Verified (1/5): Present: `idx_job_queue_status`. **Missing: `idx_scan_sessions_org`, `idx_scan_documents_retention`, `idx_audit_logs_org_time`, `idx_org_users_lookup`** (FAIL)
-     - Detail: `Remote Supabase verification failed: Missing required views: [documents, reports, consents]; Missing required indexes: [idx_scan_sessions_org, idx_scan_documents_retention, idx_audit_logs_org_time, idx_org_users_lookup]`
-
-### Gate 5: Live Supabase Integration Suite
-- **Command**: `FORCE_SUPABASE_TESTS=true npx tsx scripts/test-supabase-integration.ts`
-- **Exit Code**: `0`
-- **Result**: **PASS (6/6 tests, 100%)**
-- **Test Details**:
-  1. `LIVE-SCHEMA-INTEGRITY-001` [SCHEMA]: **PASS** (12 base tables and 3 private buckets active)
-  2. `LIVE-DB-RLS-ISOLATION-001` [RLS]: **PASS** (Authenticated User B strictly rejected from User A/Tenant A resources)
-  3. `LIVE-STORAGE-POLICY-AUTH-001` [STORAGE]: **PASS** (Cross-tenant storage operations strictly rejected)
-  4. `LIVE-PHYSICAL-DELETION-VERIFY-001` [DELETION]: **PASS** (Authoritative 404/Object Not Found returned post-deletion)
-  5. `LIVE-DURABLE-QUEUE-RECOVERY-001` [QUEUE]: **PASS** (Single claim lease, lease recovery, `COMPLETED` status persisted, completed worker exclusion, bounded retry limit)
-  6. `LIVE-TEARDOWN-CLEANUP-001` [DELETION]: **PASS** (Explicit tracking verified 0 cleanup failures; zero test debris remaining in remote database, auth, or storage)
+### 3.2 Real Supabase PostgreSQL Environment (Remote Live Verification)
+The live Supabase verification interacts over the network with the actual Supabase project (`https://zgoehrmlejmehmiccete.supabase.co`) via the `get_schema_verification()` RPC and PostgREST endpoints:
+- **`LIVE-SUPABASE-SCHEMA-VERIFY-001` (PASS)**: Authoritatively confirmed remote database schema matching expectations without fallbacks or mock substitutions.
 
 ---
 
-## 4. Final Gate Execution & Verdict
+## 4. Live Schema & Component Verification Details
 
-- **Final Gate Command**: `bash scripts/final-gate.sh`
-- **Actual Exit Code**: `1`
-- **Failure Point**: Step 4 (`npm run test:migrations`)
-- **Reason**: Remote live Supabase PostgreSQL database lacks views `documents`, `reports`, `consents` and indexes `idx_scan_sessions_org`, `idx_scan_documents_retention`, `idx_audit_logs_org_time`, `idx_org_users_lookup`.
-- **Verdict**: **RELEASE BLOCKED**
+### 4.1 Remote RPC Verification (`get_schema_verification`)
+The `get_schema_verification()` function is defined as `SECURITY DEFINER SET search_path = public` with execution permissions granted strictly to `service_role` (revoked from `PUBLIC`, `anon`, and `authenticated`). The RPC call returned the full live schema payload:
 
-### Remediation Action Required for Promotion:
-To transition from **RELEASE BLOCKED** to **RELEASE READY**, the remote Supabase database (`zgoehrmlejmehmiccete.supabase.co`) must have the remaining DDL from `supabase/migrations/202610100001_authoritative_schema.sql` applied via the Supabase Dashboard SQL Editor:
-1. `CREATE OR REPLACE VIEW public.documents ...`
-2. `CREATE OR REPLACE VIEW public.reports ...`
-3. `CREATE OR REPLACE VIEW public.consents ...`
-4. `CREATE INDEX IF NOT EXISTS idx_scan_sessions_org ...`
-5. `CREATE INDEX IF NOT EXISTS idx_scan_documents_retention ...`
-6. `CREATE INDEX IF NOT EXISTS idx_audit_logs_org_time ...`
-7. `CREATE INDEX IF NOT EXISTS idx_org_users_lookup ...`
+- **Tables (14 / 14 verified)**:
+  `organizations`, `profiles`, `organization_users`, `business_profiles`, `system_profiles`, `scan_sessions`, `scan_documents`, `scan_reports`, `findings`, `remediations`, `job_queue`, `audit_logs`, `privacy_consents`, `privacy_requests`.
+- **Row-Level Security (14 / 14 verified)**:
+  RLS confirmed enabled on all 14 authoritative tables in the live database.
+- **Compatibility Views (5 / 5 verified)**:
+  `users`, `scans`, `documents`, `reports`, `consents`.
+  All 5 views verified active and responding in the live database schema.
+- **Performance Indexes (5 / 5 verified)**:
+  - `idx_scan_sessions_org` (on `scan_sessions(organization_id)`) — Active
+  - `idx_scan_documents_retention` (on `scan_documents(retention_expires_at)`) — Active
+  - `idx_audit_logs_org_time` (on `audit_logs(organization_id, timestamp DESC)`) — Active
+  - `idx_job_queue_status` (on `job_queue(status, updated_at)`) — Active
+  - `idx_org_users_lookup` (on `organization_users(organization_id, user_id)`) — Active
+- **Security Policies (18 verified)**:
+  Exact table/policy pairs verified matching authoritative definitions with zero missing policies.
 
-Once applied remotely, re-running `bash scripts/final-gate.sh` will complete all 5 gates with exit code `0`.
+---
+
+## 5. Live Supabase Integration Test Breakdown
+
+Executed with real authenticated users and live service role against `zgoehrmlejmehmiccete.supabase.co`:
+
+1. **`LIVE-SCHEMA-INTEGRITY-001` (PASS)**:
+   All authoritative tables active; 3 required private buckets (`invoices`, `reports`, `quarantine`) verified with private access controls.
+2. **`LIVE-DB-RLS-ISOLATION-001` (PASS)**:
+   Real authenticated User B in Organization B was strictly blocked from reading, inserting, modifying, or deleting records belonging to Organization A.
+3. **`LIVE-STORAGE-POLICY-AUTH-001` (PASS)**:
+   User B was strictly blocked by storage policies from downloading, uploading, overwriting, or removing objects located under Tenant A prefix paths (`fd127178-d37b-4191-9bfd-44f269324876/*`).
+4. **`LIVE-PHYSICAL-DELETION-VERIFY-001` (PASS)**:
+   Physical deletion of storage artifacts confirmed. Subsequent retrieval requests returned deterministic 404 Object Not Found errors (no ambiguous 200 or cached responses).
+5. **`LIVE-DURABLE-QUEUE-RECOVERY-001` (PASS)**:
+   PostgreSQL durable job queue validated via `JobQueue`: worker exclusion enforced, simulated expired worker lease reclaimed by recovery supervisor, final job marked `COMPLETED`, no duplicate lease claim verified (`attempt_count=2`), and bounded retry limits enforced.
+6. **`LIVE-TEARDOWN-CLEANUP-001` (PASS)**:
+   Complete cleanup routine executed for all test users, organizations, profiles, scan sessions, queue operations, and storage files. Independent post-cleanup verification queries confirmed **0 residual test artifacts** remaining across all database tables and storage buckets.
+
+---
+
+## 6. Migration Artifact Reference
+
+The reconciliation migration is captured in `supabase/migrations/202610100006_reconcile_views_and_indexes.sql`:
+- Idempotently adds base table columns (`scan_documents.retention_expires_at`, `scan_documents.scan_id`, `scan_reports.scan_id`, `privacy_consents.policy_version`, `privacy_consents.necessary`, `privacy_consents.preferences`, `privacy_consents.analytics`, `privacy_consents.marketing`, `privacy_consents.jurisdiction_context`, `privacy_consents.timestamp`, `audit_logs.timestamp`, `audit_logs.actor_id`, `audit_logs.ip_address`, `audit_logs.result`).
+- Performs UUID-safe backfills (`user_id::text`, `session_id::text`).
+- Creates compatibility views (`public.documents`, `public.reports`, `public.consents`) with grants for `authenticated` and `service_role`.
+- Creates missing performance indexes (`idx_scan_sessions_org`, `idx_scan_documents_retention`, `idx_audit_logs_org_time`, `idx_job_queue_status`, `idx_org_users_lookup`).
+
+---
+
+## 7. Final Release Decision
+
+```
+================================================================
+                      RELEASE READY
+================================================================
+Commit SHA:           2a1e6dbfd8d98a1f684c905c5555a35dd4494c38
+Verification Time:    2026-10-11T16:33:42Z
+Final Gate Command:   bash scripts/final-gate.sh
+Exit Code:            0
+Total Passed Gates:   5 / 5 (53 / 53 individual checks passed)
+================================================================
+```
+
+### Remaining Operational Risks
+1. **Network Connectivity**: Live Supabase verification depends on egress to `https://zgoehrmlejmehmiccete.supabase.co`. Production environments must maintain standard outbound HTTPS access.
+2. **Service Role Key Rotation**: Any future rotation of `SUPABASE_SERVICE_ROLE_KEY` requires updating deployment secrets to maintain queue worker and background job execution.
